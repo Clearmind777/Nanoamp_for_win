@@ -20,7 +20,8 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.5.md       # bundled dependencies and cross-platform compatibility
     |-- work_report.6.md       # GitHub remote, Windows minimap2 build, local R regression
     |-- work_report.7.md       # Windows/Linux repository split and offline verification
-    `-- work_report.8.md       # Python/Tkinter desktop window and exe packaging
+    |-- work_report.8.md       # Python/Tkinter desktop window and exe packaging
+    `-- work_report.9.md       # three deliverables separated, install.exe, user README
 ```
 
 Start with `programs_dev_info.md` for the original request and

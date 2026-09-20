@@ -1,6 +1,6 @@
 R_PKG := 02_code/r
 
-.PHONY: help install test check cli gui gui-python gui-exe gui-test deps toolchain offline-bundle offline-install clean-builds
+.PHONY: help install test check cli gui gui-python gui-exe gui-test release install-exe release-check release-test deps toolchain offline-bundle offline-install clean-builds
 
 help:
 	@echo "nanoamp (Windows variant) project targets:"
@@ -12,6 +12,9 @@ help:
 	@echo "  make gui-python       Launch the Python/Tkinter desktop GUI"
 	@echo "  make gui-exe          Rebuild 06_GUI/dist/nanoamp.exe"
 	@echo "  make gui-test         Run the Python GUI self-tests"
+	@echo "  make release          Rebuild the whole release/ tree payload"
+	@echo "  make install-exe      Rebuild release/install.exe"
+	@echo "  make release-test     Verify the release layout and installer logic"
 	@echo "  make deps             Show how the bundled minimap2.exe was built"
 	@echo "  make toolchain        Install the MSYS2/MINGW-w64 build toolchain"
 	@echo "  make offline-bundle   Fetch the offline installer bundle into dist/"
@@ -47,6 +50,27 @@ gui-test:
 	python 06_GUI/tests/test_headless.py
 	python 06_GUI/tests/test_e2e.py
 	python 06_GUI/tests/test_frozen.py
+
+# --- release/ : the bundle that is handed to a user -------------------------
+# Rebuilds the payload pieces (R package tarball, GUI exe) into release/.
+release:
+	mkdir -p 05_builds/r release/01_R-package release/03_GUI
+	R CMD build $(R_PKG) --no-build-vignettes
+	mv nanoamp_*.tar.gz release/01_R-package/
+	cp -f release/01_R-package/nanoamp_*.tar.gz 05_builds/r/ 2>/dev/null || true
+	python 06_GUI/build_exe.py
+	cp -f 06_GUI/dist/nanoamp.exe release/03_GUI/nanoamp.exe
+	@echo "Now run: python release/_installer/build_installer_exe.py"
+
+install-exe:
+	python release/_installer/build_installer_exe.py
+
+release-test:
+	python release/_installer/test_installer_logic.py
+	python release/_installer/test_release_layout.py
+
+release-check:
+	release/install.exe --check
 
 # The Windows binary is already bundled; this only tells you how to rebuild it.
 deps:
