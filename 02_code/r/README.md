@@ -57,17 +57,18 @@ devtools::install("02_code/r")
 
 ### 3. Install external tools
 
+Nothing to install: the repository bundles a native Windows `minimap2.exe`.
 `minimap2` is resolved from `03_dependence/<os>-<arch>/bin/` first, then from
 `PATH`. `samtools` is optional: SAM to BAM conversion uses
 `Rsamtools::asBam()` by default.
 
-Detailed installation and `PATH` configuration instructions for Linux and
-Windows are in [inst/docs/INSTALL_DEPENDENCIES.md](inst/docs/INSTALL_DEPENDENCIES.md).
+`PATH` configuration and troubleshooting instructions are in
+[inst/docs/INSTALL_DEPENDENCIES.md](inst/docs/INSTALL_DEPENDENCIES.md).
 
 `nanoamp` prefers tools from `03_dependence/<os>-<arch>/bin/`, then falls back
-to `PATH`. The repository bundles minimap2 2.31 for Linux x86_64; the platform
-support matrix and the R-native fallback are documented in
-`03_dependence/README.md`.
+to `PATH`. The repository bundles minimap2 2.31 for Windows x86_64 (built from
+source in-repo, statically linked); the Windows support matrix, the rebuild
+recipe and the R-native fallback are documented in `03_dependence/README.md`.
 
 ```bash
 minimap2 --version

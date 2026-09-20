@@ -1,7 +1,11 @@
-# Installing dependencies for nanoamp
+# Installing dependencies for nanoamp (Windows)
 
 This guide explains how to install and configure `minimap2`, `samtools` and
-the R packages required by `nanoamp` on Linux and Windows.
+the R packages required by `nanoamp` on Windows.
+
+This is the Windows variant of the project. `conda` and `WSL` are deliberately
+not used; the Linux variant lives in the sister repository
+`a_09_18_26_mapping_programs_dev_for_linux`.
 
 ## 1. What is needed
 
@@ -16,130 +20,75 @@ the R packages required by `nanoamp` on Linux and Windows.
 Mode C (raw exact matching) does not need `minimap2`. `samtools` is never
 required because `Rsamtools::asBam()` handles SAM to BAM conversion.
 
-## 1.1 Bundled tools and the R-native fallback
+## 2. minimap2 is already bundled
 
-`nanoamp` looks for tools in this order:
-
-1. `NANOAMP_MINIMAP2` / `NANOAMP_SAMTOOLS` environment variables;
-2. `03_dependence/<os>-<arch>/bin/`;
-3. `PATH`.
-
-The repository bundles minimap2 2.31 for Linux x86_64 under
-`03_dependence/linux-x86_64/bin/`. See `03_dependence/README.md` for the full
-platform matrix.
-
-On platforms without a minimap2 binary (Windows, ARM), use the R-native
-backend:
-
-```r
-run_haplotype_analysis(..., aligner = "r")
-```
-
-`samtools` is optional because `Rsamtools::asBam()` converts SAM to BAM by
-default. Use `use_samtools = TRUE` only if you need the samtools path.
-
-## 2. Linux
-
-### Option A: conda / mamba (recommended)
-
-```bash
-conda create -n nanoamp -c conda-forge -c bioconda minimap2 samtools
-conda activate nanoamp
-
-which minimap2
-minimap2 --version
-
-which samtools
-samtools --version
-```
-
-Then install R packages inside the same R environment (see section 4).
-
-### Option B: system packages
-
-Debian / Ubuntu:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y minimap2 samtools
-```
-
-CentOS / Rocky / AlmaLinux:
-
-```bash
-sudo dnf install -y minimap2 samtools
-```
-
-### Verify
-
-```bash
-which minimap2
-which samtools
-
-Rscript -e 'library(nanoamp); nanoamp_cli("doctor")'
-```
-
-## 3. Windows
-
-There are no official Windows binaries for `minimap2` or `samtools`, and
-conda-forge / bioconda do not provide win-64 builds for them. Choose one of the
-following options.
-
-### Option A: R-native backend (recommended)
-
-Use the R-native alignment backend, which needs no external tool:
-
-```r
-run_haplotype_analysis(..., aligner = "r")
-```
-
-This is the simplest Windows setup and works for small and medium amplicons.
-
-### Option B: WSL2 (recommended when minimap2 speed is needed)
-
-1. Install WSL2 and Ubuntu.
-2. Follow the Linux installation instructions in section 2 inside WSL.
-3. Run nanoamp inside WSL, pointing it to the data files.
-
-### Option C: third-party Windows binaries (optional)
-
-If you have third-party builds, place them here:
+You normally do not have to install anything: the repository ships a native
+Windows build of minimap2 2.31 at
 
 ```text
 03_dependence\windows-x86_64\bin\minimap2.exe
-03_dependence\windows-x86_64\bin\samtools.exe    # optional
 ```
 
-nanoamp resolves these files automatically. `samtools.exe` is optional because
-`Rsamtools` handles SAM to BAM conversion by default.
+`nanoamp` finds tools in this order:
 
-### Configure PATH (only for Option C)
+1. `NANOAMP_MINIMAP2` / `NANOAMP_SAMTOOLS` environment variables;
+2. `03_dependence\<os>-<arch>\bin\` (`.exe` on Windows);
+3. `PATH`.
 
-1. Open **System Properties -> Environment Variables**.
-2. Edit the `Path` variable.
-3. Add the folder that contains `minimap2.exe` (and optionally `samtools.exe`).
-4. Click OK and **restart RStudio / terminal**.
-5. Verify in R:
+Because the bundled binary sits at level 2, it is picked up automatically with
+no PATH changes. It is statically linked against libwinpthread and zlib, so it
+depends only on `KERNEL32.dll` and `msvcrt.dll` and runs on a machine with no
+MSYS2, Cygwin, conda or WSL installed.
+
+Verify:
 
 ```r
-Sys.which("minimap2")
-Sys.which("samtools")   # optional
 library(nanoamp)
-nanoamp_cli("doctor")
+nanoamp:::nanoamp_tool_path("minimap2")
+# ".../03_dependence/windows-x86_64/bin/minimap2.exe"
+nanoamp:::nanoamp_tool_version("minimap2")
+# "2.31-r1302"
 ```
 
-Alternatively, skip PATH entirely by placing the binaries under
-`03_dependence\windows-x86_64\bin\`.
+### Rebuilding it from source
 
-### Windows pitfalls
+Upstream publishes no official Windows binary, but minimap2 compiles natively
+with the MSYS2 MINGW-w64 toolchain. Two unattended, non-admin steps:
 
-- **Do not rely on `conda install minimap2 samtools`**: there is no win-64
-  build for these packages.
-- **PATH not refreshed**: restart RStudio after changing `PATH`.
-- **Spaces or non-ASCII characters in paths**: prefer `C:\tools\...`.
-- **Windows SmartScreen**: allow the downloaded binaries if prompted.
-- **Multiple R installations**: check `Rscript -e 'cat(R.home())'` and make
-  sure the package is installed into the R you actually use.
+```powershell
+# 1. portable MSYS2 + MINGW-w64 toolchain (~1.5 GB, outside the repo)
+pwsh -File 03_dependence/windows-x86_64/install_msys2_toolchain.ps1
+
+# 2. build and install minimap2.exe
+bash 03_dependence/windows-x86_64/build_minimap2.sh
+```
+
+Pinned versions, the compiler flags that matter and the resulting hash are in
+`03_dependence/windows-x86_64/README.md`.
+
+### If you cannot use the bundled binary
+
+On Windows on ARM, or if you prefer no external tool at all, use the R-native
+alignment backend:
+
+```r
+run_haplotype_analysis(..., aligner = "r")
+```
+
+This is slower than minimap2 and is intended for small and medium amplicons.
+Mode C needs no external tool either.
+
+You can also supply your own build: drop `minimap2.exe` into
+`03_dependence\windows-x86_64\bin\` and nanoamp will resolve it, or point
+`NANOAMP_MINIMAP2` at it. Adding the folder to `PATH` works too, but is not
+necessary.
+
+## 3. samtools
+
+Not needed and not bundled. `Rsamtools::asBam()` converts minimap2's SAM output
+to BAM by default. Set `use_samtools = TRUE` only if you explicitly want the
+samtools path, in which case you must build samtools yourself — htslib
+documents MSYS2/MINGW64 as the recommended Windows build environment.
 
 ## 4. R packages
 
@@ -162,8 +111,16 @@ BiocManager::install(c("Biostrings", "Rsamtools", "ShortRead", "IRanges"))
 Optional:
 
 ```r
-BiocManager::install("DECIPHER")          # Mode B
-install.packages(c("shiny", "DT"))  # GUI
+BiocManager::install("DECIPHER")     # Mode B clustering
+BiocManager::install("pwalign")      # required by aligner = "r" on Bioconductor >= 3.19
+install.packages(c("shiny", "DT"))   # GUI
+```
+
+For a fully scripted setup, including a dedicated library outside the
+repository and mirrors that work from this network, use:
+
+```powershell
+Rscript 03_dependence/r-environment/setup_r_environment.R
 ```
 
 ## 5. Verification checklist
@@ -182,27 +139,39 @@ Rscript: ...
   Biostrings   TRUE
   ...
   DECIPHER     TRUE
-  minimap2     /path/to/minimap2
-  samtools     /path/to/samtools
+  minimap2     .../03_dependence/windows-x86_64/bin/minimap2.exe
+  samtools     NOT FOUND
 ```
 
 What to check:
 
 - `minimap2` shows a path, not `NOT FOUND`;
-- `samtools` is optional and may show `NOT FOUND` unless
-  `use_samtools = TRUE`;
+- `samtools` showing `NOT FOUND` is expected and harmless;
 - R packages show `TRUE`;
 - `DECIPHER` may be `FALSE`: Mode B still works with a fallback, but DECIPHER
   is recommended.
 
-## 6. Dependency reduction status
+## 6. Windows pitfalls
 
-The following improvements are already implemented:
+- **`conda install minimap2 samtools` will not work**: there is no win-64 build
+  for these packages, and this project does not use conda anyway.
+- **WSL is not used** by this project; there is no need to install it.
+- **PATH not refreshed**: restart RStudio after changing `PATH`.
+- **Spaces or non-ASCII characters in paths**: prefer `C:\tools\...`.
+- **Windows SmartScreen**: allow the downloaded binaries if prompted.
+- **Multiple R installations**: check `Rscript -e 'cat(R.home())'` and make
+  sure the package is installed into the R you actually use.
+
+## 7. Dependency reduction status
+
+Already implemented:
 
 1. `Rsamtools::asBam()` performs SAM to BAM conversion by default, so the
    `samtools` command is optional;
-2. `aligner = "r"` provides an R-native pairwise alignment backend for small
-   and medium datasets, and for Windows / ARM platforms without minimap2;
-3. `minimap2` remains the recommended backend for large datasets.
+2. a native Windows `minimap2.exe` is bundled, so no external installation step
+   is needed;
+3. `aligner = "r"` provides an R-native pairwise alignment backend for small
+   and medium datasets, and for Windows on ARM;
+4. `minimap2` remains the recommended backend for large datasets.
 
 Set `use_samtools = TRUE` only if you explicitly need the samtools path.

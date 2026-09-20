@@ -63,9 +63,13 @@ if (-not $SkipVerify) {
     if ($line -notmatch '^([0-9a-fA-F]{64})\s+(.+)$') { continue }
     $expected = $Matches[1].ToLower()
     $rel = $Matches[2].Trim()
-    $file = Join-Path $BundleDir $rel
+    # Paths are relative and use forward slashes; normalise for Windows.
+    # (An absolute path would also be tolerated, but then it would not be
+    # portable, which is why the generator writes relative paths.)
+    if ([System.IO.Path]::IsPathRooted($rel)) { $file = $rel }
+    else { $file = Join-Path $BundleDir ($rel -replace '/', '\') }
     $n++
-    if (-not (Test-Path $file)) { Warn2 "MISSING $rel"; $bad++; continue }
+    if (-not (Test-Path -LiteralPath $file)) { Warn2 "MISSING $rel"; $bad++; continue }
     $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $expected) { Warn2 "MISMATCH $rel"; $bad++ }
   }
@@ -76,26 +80,34 @@ if (-not $SkipVerify) {
 }
 
 # --- 2. install R ----------------------------------------------------------
+# Accept either an installation root (D:\tools\R containing R-4.6.1\) or an
+# R home directly (D:\tools\R\R-4.6.1).
+function Get-RHome([string]$root) {
+  if (Test-Path (Join-Path $root 'bin\Rscript.exe')) { return (Resolve-Path $root).Path }
+  $sub = Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.FullName 'bin\Rscript.exe') } |
+    Select-Object -First 1
+  if ($sub) { return $sub.FullName }
+  return $null
+}
+
 $rExe = Get-ChildItem $BundleDir -Filter 'R-*-win.exe' | Select-Object -First 1
 if (-not $rExe) { throw "R installer not found in $BundleDir" }
 $rHome = $null
-$cand = Get-ChildItem $RDir -Directory -ErrorAction SilentlyContinue |
-  Where-Object { Test-Path (Join-Path $_.FullName 'bin\Rscript.exe') } |
-  Select-Object -First 1
-if ($cand) {
-  $rHome = $cand.FullName
+if (Test-Path $RDir) { $rHome = Get-RHome $RDir }
+if ($rHome) {
   Say "R already installed: $rHome"
 } else {
   Say "Installing $($rExe.Name) (current user, silent)"
   New-Item -ItemType Directory -Force -Path $RDir | Out-Null
-  $target = Join-Path $RDir ($rExe.BaseName -replace '^R-', 'R-')
+  # BaseName looks like "R-4.6.1-win"; strip the trailing "-win" for the folder.
+  $ver = $rExe.BaseName -replace '-win$', ''
+  $target = Join-Path $RDir $ver
   $p = Start-Process -FilePath $rExe.FullName -Wait -PassThru -ArgumentList @(
     '/VERYSILENT', '/NORESTART', '/CURRENTUSER', "/DIR=$target"
   )
   if ($p.ExitCode -ne 0) { throw "R installer exited with $($p.ExitCode)" }
-  $rHome = (Get-ChildItem $RDir -Directory |
-    Where-Object { Test-Path (Join-Path $_.FullName 'bin\Rscript.exe') } |
-    Select-Object -First 1).FullName
+  $rHome = Get-RHome $RDir
   if (-not $rHome) { throw "R installation not found under $RDir" }
   Ok $rHome
 }
@@ -105,7 +117,7 @@ $rexec   = Join-Path $rHome 'bin\R.exe'
 # --- 3. install packages from the local repository -------------------------
 New-Item -ItemType Directory -Force -Path $RLib | Out-Null
 Say "Installing R packages from the local repository"
-$localRepo <- 'file:///' + ($pkgDir -replace '\\', '/')
+$localRepo = 'file:///' + ($pkgDir -replace '\\', '/')
 $installScript = Join-Path $env:TEMP 'nanoamp_offline_pkgs.R'
 # NOTE: use repos= (not contriburl=). For a local repository root the two
 # differ: repos= resolves <root>/bin/windows/contrib/<rver>/PACKAGES, while

@@ -3,6 +3,9 @@
 This directory contains the R package, the R-based command line interface and
 the R Shiny GUI.
 
+This is the **Windows variant** of the project; the Linux variant lives in the
+sister repository `a_09_18_26_mapping_programs_dev_for_linux`.
+
 ```text
 02_code/
 |-- README.md / README-CN.md
@@ -37,7 +40,7 @@ External tools are bundled under `03_dependence/` at the repository root.
 3. **Data and code are separate**: test data lives in `01_data/`; run outputs
    live in `04_results/<front-end>/`.
 4. **Windows first for the GUI**: the GUI is built with Shiny so it runs on
-   Windows, Linux and macOS, and can be packaged with RInno later.
+   Windows, and can be packaged with RInno later.
 5. **Bundled tools first**: external tools are resolved from
    `03_dependence/<os>-<arch>/bin/` before `PATH`.
 

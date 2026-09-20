@@ -1,20 +1,29 @@
-# nanoamp
+# nanoamp — Windows
 
 `nanoamp` analyzes Oxford Nanopore reads from PCR amplicons. Given a FASTQ file
 and a target sequence, it corrects sequencing errors, reconstructs haplotypes,
 and reports the most abundant sequences with counts and proportions.
 
+This is the **Windows variant** of the project. It owns all Windows-specific
+material: the native `minimap2.exe`, the MSYS2/MINGW-w64 build recipe, the
+Windows R environment helpers and the air-gapped installer bundle.
+
+The Linux variant lives in the sister repository
+`a_09_18_26_mapping_programs_dev_for_linux`.
+
+Neither variant uses conda, and neither uses WSL.
+
 ## Repository layout
 
 ```text
 00_materials/     project brief, development plan and work reports
-01_data/          raw test data and the normalized symlink layer
+01_data/          raw test data and the normalized link layer
 02_code/          source code
   r/              nanoamp R package
   cli/            standalone R CLI entry points and launchers
   gui/            standalone R Shiny GUI entry points and launchers
   shared/         cross-language parameter and output contracts
-03_dependence/    bundled external tools and fetch instructions
+03_dependence/    bundled minimap2.exe, build recipe, offline bundle, R helpers
 04_results/       run outputs (Git ignores everything except README)
 05_builds/        R tarballs and R CMD check outputs (Git ignored)
 tmp/              scratch space (Git ignored)
@@ -22,21 +31,22 @@ tmp/              scratch space (Git ignored)
 
 ## Quick start
 
-```bash
-# 1. Install the R package
+The bundle ships `minimap2.exe` (statically linked, no MSYS2/Cygwin/conda/WSL
+needed at runtime), so a normal run needs nothing but R.
+
+```powershell
+# 1. Install the R package (see 03_dependence/r-environment/README.md for R itself)
 R CMD INSTALL 02_code/r
 
-# 2. Check the environment (repository launcher)
+# 2. Check the environment
 sh 02_code/cli/nanoamp doctor
 
-# Optional: install a global `nanoamp` command
-sh 02_code/cli/install_cli.sh ~/.local/bin
-
-# 3. Run one sample
-sh 02_code/cli/nanoamp call \
-  --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq \
-  --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa \
-  --mode A --top-n 20 \
+# 3. Install the test-data link layer (see the note below), then run one sample
+Rscript 03_dependence/r-environment/materialize_test_data.R
+sh 02_code/cli/nanoamp call `
+  --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq `
+  --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa `
+  --mode A --top-n 20 `
   --outdir 04_results/cli/demo
 
 # 4. Launch the GUI
@@ -56,6 +66,20 @@ res <- run_haplotype_analysis(
 res$haplotypes
 ```
 
+### The `ln_test_data` link layer on Windows
+
+`01_data/ln_test_data/**` is stored in Git as symlinks. Windows can only create
+symlinks with Developer Mode (or `SeCreateSymbolicLinkPrivilege`) enabled, so in
+a normal checkout those files land as ~100 byte text stubs containing a path
+instead of sequence data. Run this once after cloning:
+
+```powershell
+Rscript 03_dependence/r-environment/materialize_test_data.R
+```
+
+It copies the real target content where a link is a stub, leaves genuine
+symlinks alone, and finishes with an MD5 check of all 201 entries.
+
 ## Documentation
 
 | Document | Content |
@@ -63,12 +87,12 @@ res$haplotypes
 | `02_code/README.md` | source tree and component status |
 | `02_code/r/README.md` | R package tutorial (English) |
 | `02_code/r/README-CN.md` | R package tutorial (Chinese) |
-| `02_code/r/inst/docs/INSTALL_DEPENDENCIES.md` | minimap2 / samtools installation on Linux and Windows |
 | `02_code/cli/README.md` | CLI contract and launchers |
 | `02_code/gui/README.md` | GUI features and Windows packaging |
-| `03_dependence/README.md` | bundled tools and platform support matrix |
+| `03_dependence/README.md` | bundled tools and Windows support matrix |
 | `03_dependence/windows-x86_64/README.md` | Windows source build of minimap2 |
-| `03_dependence/r-environment/README.md` | R environment setup (Windows) |
+| `03_dependence/r-environment/README.md` | R environment setup and test runners |
+| `03_dependence/offline-bundle/README.md` | air-gapped installation |
 | `00_materials/README.md` | planning documents and work reports |
 
 ## External tools
@@ -76,38 +100,39 @@ res$haplotypes
 `nanoamp` resolves tools in this order:
 
 1. `NANOAMP_MINIMAP2` / `NANOAMP_SAMTOOLS`;
-2. `03_dependence/<os>-<arch>/bin/`;
+2. `03_dependence/<os>-<arch>/bin/` (`.exe` on Windows);
 3. `PATH`.
 
-The repository bundles minimap2 2.31 for **Linux x86_64 and Windows x86_64**.
-The Windows binary is built from upstream source in this repository and is
-statically linked, so it needs no MSYS2, Cygwin, conda or WSL at runtime:
+The repository bundles **minimap2 2.31 for Windows x86_64**, built from upstream
+source in this repository and statically linked, so it needs no MSYS2, Cygwin,
+conda or WSL at runtime (it depends only on `KERNEL32.dll` and `msvcrt.dll`).
+There is no official Windows build upstream; to reproduce this one:
 
 ```powershell
-pwsh -File 03_dependence/windows-x86_64/install_msys2_toolchain.ps1  # toolchain
+pwsh -File 03_dependence/windows-x86_64/install_msys2_toolchain.ps1  # toolchain (~1.5 GB)
 bash 03_dependence/windows-x86_64/build_minimap2.sh                  # build
 ```
 
-On platforms without a bundled binary (ARM), use the R-native backend:
+On Windows on ARM, use the R-native backend instead:
 
 ```r
 run_haplotype_analysis(..., aligner = "r")
 ```
 
-samtools is optional: SAM to BAM conversion uses `Rsamtools::asBam()` by
-default, so no samtools binary is needed on any platform.
+samtools is optional and not bundled: SAM to BAM conversion uses
+`Rsamtools::asBam()` by default, so no samtools binary is needed.
 
 ## Running the test suite
 
-```bash
-# on Windows, first repair the test-data symlink layer (no-op on Linux)
+```powershell
+# repair the test-data link layer first (once per clone)
 Rscript 03_dependence/r-environment/materialize_test_data.R
 
-# unit tests (uses the bundled/installed minimap2 when available)
+# unit tests (uses the bundled minimap2)
 Rscript 03_dependence/r-environment/run_tests.R
 
 # functional regression over the real datasets in 01_data/
-Rscript 03_dependence/r-environment/run_functional_regression.R \
+Rscript 03_dependence/r-environment/run_functional_regression.R `
   --outdir 04_results/r/test_run_win --modes A,B,C --threads 4
 ```
 
@@ -117,10 +142,10 @@ environment setup (R install, mirrors, dependency installation).
 ## Offline / air-gapped installation
 
 To provision a machine with no network, build a pinned bundle of every upstream
-installer (R, all 109 R package binaries, the MSYS2 toolchain for rebuilds,
-minimap2 source) and install from it:
+installer (the R installer, the full R package closure, the MSYS2 toolchain for
+rebuilds, and the minimap2 source) and install from it:
 
-```bash
+```powershell
 # on a machine with a network
 Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R
 
@@ -128,20 +153,23 @@ Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R
 pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 ```
 
-The 291 MB bundle lands in `dist/`, which is git-ignored: the repository keeps
-the reproducible recipe and hashes, not the binaries. Rationale and the
-self-contained alternatives (USB payload, GitHub release assets) are in
-`03_dependence/offline-bundle/README.md`.
+The bundle lands in `dist/`, which is git-ignored: the repository keeps the
+reproducible recipe and hashes, not the binaries. Rationale, the exact size
+breakdown and the self-contained alternatives (USB payload, GitHub release
+assets) are in `03_dependence/offline-bundle/README.md`.
 
 ## Common commands
 
 ```bash
-make install     # install the R package
-make test        # run testthat tests
-make check       # build and R CMD check
-make cli         # run `nanoamp doctor`
-make gui         # launch the Shiny GUI
-make deps        # fetch external tools where possible
+make install          # install the R package
+make test             # run testthat tests
+make check            # build and R CMD check
+make cli              # run `nanoamp doctor`
+make gui              # launch the Shiny GUI
+make deps             # show how the bundled minimap2.exe was built
+make toolchain        # install the MSYS2/MINGW-w64 build toolchain
+make offline-bundle   # fetch the offline installer bundle into dist/
+make offline-install  # install everything from the bundle (no network)
 ```
 
 ## License

@@ -340,8 +340,12 @@ all_files <- all_files[!file.info(all_files)$isdir]
 # exclude the manifests themselves from their own checksum list
 all_files <- all_files[!basename(all_files) %in% c("SOURCES.tsv", "SHA256SUMS.txt")]
 sums <- vapply(all_files, sha256, character(1))
-writeLines(sprintf("%s  %s", sums,
-                   sub(paste0("^", dest, "/?"), "", all_files)),
+# Paths in SHA256SUMS.txt must be RELATIVE to the bundle and use forward
+# slashes: the Windows verifier joins them onto the bundle directory, and an
+# absolute Windows path (with backslashes) would not strip correctly here.
+rel <- sub(paste0("^", gsub("\\\\", "/", dest), "/?"), "",
+           gsub("\\\\", "/", all_files))
+writeLines(sprintf("%s  %s", sums, rel),
            file.path(dest, "SHA256SUMS.txt"))
 
 total <- sum(file.info(all_files)$size, na.rm = TRUE)

@@ -10,7 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Windows variant of nanoamp; the Linux variant lives in the sister
+        # repository a_09_18_26_mapping_programs_dev_for_linux.
+        os: [windows-latest]
     steps:
       - uses: actions/checkout@v4
 

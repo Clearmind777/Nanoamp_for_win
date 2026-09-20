@@ -1,6 +1,9 @@
 # 03_dependence
 
-External tools bundled with nanoamp.
+External tools bundled with the **Windows build** of nanoamp.
+
+This repository is the Windows variant. The Linux variant lives in the sister
+repository `a_09_18_26_mapping_programs_dev_for_linux`.
 
 ## Layout
 
@@ -9,21 +12,24 @@ External tools bundled with nanoamp.
 |-- README.md
 |-- README-CN.md
 |-- manifest.tsv
-|-- fetch_dependencies.sh
 |-- licenses/
 |   `-- minimap2-LICENSE.txt
-|-- linux-x86_64/bin/
-|   |-- minimap2
-|   `-- samtools          # optional fallback
 |-- windows-x86_64/
 |   |-- README.md
 |   |-- install_msys2_toolchain.ps1   # reproducible toolchain installer
 |   |-- build_minimap2.sh             # builds minimap2.exe from source
 |   `-- bin/minimap2.exe              # built in-repo, statically linked
-|-- linux-arm64/README.md
 |-- windows-arm64/README.md
-|-- macos-x86_64/README.md
-`-- macos-arm64/README.md
+|-- offline-bundle/                   # air-gapped provisioning (R + packages)
+|   |-- README.md
+|   |-- fetch_offline_bundle.R
+|   `-- install_offline.ps1
+`-- r-environment/                    # R setup and test runners for Windows
+    |-- README.md
+    |-- setup_r_environment.R
+    |-- run_tests.R
+    |-- run_functional_regression.R
+    `-- materialize_test_data.R
 ```
 
 ## How nanoamp finds external tools
@@ -31,7 +37,7 @@ External tools bundled with nanoamp.
 Resolution order:
 
 1. environment variable `NANOAMP_MINIMAP2` / `NANOAMP_SAMTOOLS`;
-2. `03_dependence/<os>-<arch>/bin/<tool>` (`<tool>.exe` on Windows);
+2. `03_dependence/<os>-<arch>/bin/<tool>.exe`;
 3. `PATH`.
 
 `NANOAMP_DEPENDENCE_DIR` can point to a different `03_dependence` location
@@ -40,31 +46,35 @@ Resolution order:
 `nanoamp doctor` prints the detected platform, the dependence directory, and
 the resolved path and version of each tool.
 
-## Platform support matrix
+## Windows support matrix
 
 | Platform | minimap2 | samtools | Notes |
 |---|---|---|---|
-| linux-x86_64 | bundled 2.31 | bundled 1.12 (optional) | Rsamtools is used for SAM -> BAM by default; samtools only with `use_samtools = TRUE` |
-| windows-x86_64 | bundled 2.31 (built in-repo) | not bundled | statically linked, runs without MSYS2/Cygwin/conda/WSL; samtools unnecessary because Rsamtools handles SAM -> BAM |
-| linux-arm64 | not bundled | not bundled | use conda or build from source; R-native backend available |
-| windows-arm64 | no binary | no binary | R-native backend, or run the x86_64 build under emulation |
-| macos-x86_64 | not bundled | not bundled | use conda |
-| macos-arm64 | not bundled | not bundled | use conda |
+| windows-x86_64 | bundled 2.31 (built in-repo) | not bundled | statically linked, runs without MSYS2/Cygwin/conda/WSL; samtools unnecessary because `Rsamtools::asBam()` is the default SAM -> BAM path |
+| windows-arm64 | no binary | not bundled | use the R-native backend (`aligner = "r"`), or run the x86_64 build under emulation |
 
 Official upstream facts:
 
-- minimap2 publishes a Linux x86_64 binary; there is no *official* Windows or
-  ARM binary, but the source builds natively on Windows with the MSYS2
-  MINGW-w64 toolchain — that is how `windows-x86_64/bin/minimap2.exe` was made.
-- samtools publishes only source; Windows binaries are not officially provided.
-  htslib's own `INSTALL` documents Windows MSYS2/MINGW64 as the recommended
-  build environment for Windows.
-- conda-forge / bioconda provide `samtools` for Linux ARM64, but not for
-  Windows; bioconda does not support Windows.
+- minimap2 publishes a Linux x86_64 binary; there is no *official* Windows
+  binary, but the source builds natively on Windows with the MSYS2 MINGW-w64
+  toolchain — that is how `windows-x86_64/bin/minimap2.exe` was made.
+- samtools publishes only source, and is not needed by this project at all:
+  `Rsamtools::asBam()` converts minimap2 SAM to BAM by default. Only set
+  `use_samtools = TRUE` if you explicitly want the samtools path, in which case
+  you would have to build it yourself (htslib documents MSYS2/MINGW64 as the
+  recommended Windows build environment).
+- conda and WSL are deliberately not used anywhere in this project.
 
-## Windows source build
+## R-native fallback
 
-Windows needs no conda and no WSL. Two unattended steps:
+`run_haplotype_analysis(..., aligner = "r")` uses Biostrings/pwalign pairwise
+alignment and needs no external binary at all. It is slower than minimap2 and
+is intended for small and medium amplicons, and for platforms where no
+minimap2 build exists (Windows on ARM).
+
+Mode C (`mode = "C"`) also needs no external tool.
+
+## Rebuilding minimap2 on Windows
 
 ```powershell
 # 1. portable MSYS2 + MINGW-w64 toolchain (~1.5 GB, outside the repo)
@@ -76,49 +86,28 @@ bash 03_dependence/windows-x86_64/build_minimap2.sh
 
 The toolchain itself is not committed (too large); the repository commits the
 two scripts above plus the resulting binary and its provenance.
-See `windows-x86_64/README.md` for the pinned versions, flags and hashes.
+See `windows-x86_64/README.md` for pinned versions, flags and hashes.
 
 ## Offline / air-gapped installation
 
 Every upstream installer can be pre-positioned as a pinned, integrity-checked
 bundle so a machine with no network can be provisioned:
 
-```bash
+```powershell
 # with a network
 Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R
 # without a network
 pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 ```
 
-The bundle (291 MB: R installer, 109 R package binaries, MSYS2 toolchain,
-minimap2 source) is written to the git-ignored `dist/`. Why the binaries are
+The bundle (R installer, the full R package closure, the MSYS2 toolchain and
+the minimap2 source) is written to the git-ignored `dist/`. Why the binaries are
 not committed, and the USB / release-asset alternatives, are documented in
 `offline-bundle/README.md`.
-
-## R-native fallback
-
-`run_haplotype_analysis(..., aligner = "r")` uses Biostrings pairwise
-alignment and needs no external binary. It is slower than minimap2 and is
-intended for small and medium amplicons, and for platforms where no minimap2
-binary exists (Windows, ARM).
-
-`aligner = "minimap2"` is the default for Linux x86_64.
-
-samtools is no longer required: `Rsamtools::asBam()` converts minimap2 SAM to
-BAM. Set `use_samtools = TRUE` only if you explicitly want the samtools path.
-
-## Fetching or updating tools
-
-```bash
-bash 03_dependence/fetch_dependencies.sh
-```
-
-The script downloads the official minimap2 Linux x86_64 binary and prints
-platform-specific instructions for Linux ARM64, Windows and macOS.
 
 ## Licenses
 
 - minimap2: MIT;
-- samtools: MIT/Expat.
+- samtools: MIT/Expat (not bundled here).
 
 License text for the bundled minimap2 binary is in `licenses/`.
