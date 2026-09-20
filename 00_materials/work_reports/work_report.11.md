@@ -182,6 +182,41 @@ Git 仓库，风险与收益都需要单独确认，本轮未动。
 - 安装位置区在窗口顶部，`修改…` 选到非 `nanoamp` 目录时自动加一层子目录
   （work_report.10 已有，本轮截图复核确认仍然正确）。
 
+### 4.6 顺带发现：`batch` 的文档与行为不一致
+
+复核文档时把 `release/02_CLI/README.md` 的批量章节拿真数据实测了一遍
+（3 行样本表：一个正常样本 + 一个故意写错路径的样本 + 又一个正常样本），
+发现两个问题：
+
+1. **文档写错了。** 原文说 `batch` 接受 `call` 的全部参数，但 `--ref-label`
+   在 `batch` 里根本不是一个命令行参数 —— 它是样本表里的可选列 `ref_label`。
+   参数表还漏了 `--min-cluster-reads`。
+2. **失败样本会留下一个空目录。** 分析函数在打开输入文件**之前**就创建
+   `outdir`，所以路径写错的样本虽然 `status=error`，却留下一个空目录。
+   一排空目录看起来像"整批跑了一半"，很难一眼看出到底成了几个。
+
+实测输出（`batch_summary.tsv`）：
+
+```text
+sample	mode	outdir	                                status	error
+E4-3	A	tmp/test_results/cli/batch_out/E4-3	ok	""
+broken	A	tmp/test_results/cli/batch_out/broken	error	FASTQ file not found: ...
+E4-3-wt	A	tmp/test_results/cli/batch_out/E4-3-wt	ok	""
+```
+
+**修复：** 样本失败且目录为空时删除它；只要里面有文件就保留，绝不破坏
+半成品。验证：`broken` 目录消失，两个成功样本各 8 个文件完好，
+`status` 列不变。
+
+同时确认 `ref_label` 列确实生效：它出现在 `qc.tsv` 的 `reference_label` 行和
+`run_manifest.json` 的 `qc.reference_label`，但**不会**改
+`run_manifest.json` 顶层的 `reference.name`（那一项始终是 FASTA 原始序列名）。
+这个区别容易误解，已写进两份文档。
+
+`release/02_CLI/README.md` 和 `00_materials/tutorial.md` 现在都完整写明了
+样本表列含义、`batch` 与 `call` 的参数关系、输出结构，
+以及"失败不中断整批、以 `status` 列为准"。
+
 ---
 
 ## 5. 教程
@@ -216,6 +251,11 @@ Git 仓库，风险与收益都需要单独确认，本轮未动。
 | 安装器 `test_locked_file_retry` | 4/4 |
 | 链接层重建 | 103 个文件，201/201 校验通过 |
 | `install.exe --check` / `uninstall.exe --dry-run` | 输出正常 |
+| CLI `batch` 实测（含一个失败样本） | `status` = ok / error / ok，失败样本空目录已清理 |
+
+> mode B 的 `mean_top1_proportion` 在两次运行间会有 ±0.005 左右的浮动
+> （0.7275 / 0.7329），这是 DECIPHER 聚类的固有随机性，不是回归。
+> mode A 的 `mean_overlap_rate` 稳定在 0.9807。
 
 ---
 
