@@ -24,9 +24,21 @@ ctx = ins.Context(root=ins.app_dir())
 print("\n--- release tree ---")
 print("offline dir    :", ctx.offline, ctx.offline.is_dir())
 print("R installer    :", ctx.r_installer)
-print("extra zips     :", len(list(ctx.extra_dir.glob("*.zip"))))
+print("R version tags :", ctx.available_r_tags())
+for tag in ctx.available_r_tags():
+    print(f"  R {tag:<6} zips:", len(list(ctx.extra_dir(tag).glob("*.zip"))))
 print("pkg tarball    :", ctx.pkg_tarball)
 print("gui exe        :", ctx.gui_exe)
+print("cli launcher   :", ctx.cli_launcher)
+print("install root   :", ctx.install_root)
+print("  lib / bin / app / config:",
+      ctx.lib, "|", ctx.bin, "|", ctx.app, "|", ctx.config)
+
+print("\n--- existing install detection ---")
+found = ins.common.find_existing_install()
+print("find_existing_install():", found[0] if found else None)
+if found:
+    print("  looks_installed():", ins.common.looks_installed(found[0]))
 
 print("\n--- R discovery ---")
 rs = ins.find_rscript()

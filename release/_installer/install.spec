@@ -18,9 +18,12 @@ a = Analysis(
     pathex=[str(PROJECT_DIR)],
     binaries=[],
     datas=[],
-    hiddenimports=["install_nanoamp"],
+    # nanoamp_common lives next to the executable at runtime; rthook_paths
+    # puts that directory on sys.path, and it is listed here so PyInstaller
+    # bundles it into the frozen app as well.
+    hiddenimports=["install_nanoamp", "nanoamp_common"],
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=[str(PROJECT_DIR / "rthook_paths.py")],
     # Keep it small: stdlib + tkinter only. winreg is a stdlib module on
     # Windows and is imported lazily, so it is listed explicitly.
     excludes=[

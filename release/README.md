@@ -7,6 +7,7 @@
 ```text
 release/
 |-- install.exe          ← 一键安装器：双击它就装好了（约 10 MB）
+|-- uninstall.exe        ← 一键卸载器：双击它就能干净删掉
 |-- 01_R-package/        R 包版：给要写 R 代码的同学
 |-- 02_CLI/              命令行版：给要批量处理样本的同学
 |-- 03_GUI/              图形界面版：给不写代码的人（最常用）
@@ -27,7 +28,23 @@ release/
 - 命令行里可以输入 `nanoamp doctor`、`nanoamp call ...`
 - R 里可以 `library(nanoamp)`
 
+不想用了就双击 **`uninstall.exe`** 卸载。
+
 详细的图文步骤见[仓库根目录的 README.md](../README.md)，以及各版本自己的 README。
+
+## 安装时可以改的东西
+
+`install.exe` 的窗口上方有两处可以调整：
+
+| 项目 | 默认 | 说明 |
+|---|---|---|
+| **安装位置** | `%LOCALAPPDATA%\nanoamp` | 点「修改…」可以改到 `D:\nanoamp` 这类位置。「恢复默认」可以还原。窗口会显示该磁盘剩余空间 |
+| **在桌面创建快捷方式** | ☑ 勾选 | 取消勾选就不建快捷方式（适合不想动桌面的情况） |
+| **把 nanoamp 命令加入用户 PATH** | ☑ 勾选 | 取消勾选则只能通过完整路径调用 `nanoamp.cmd` |
+
+装到非默认位置时，安装器会把位置记录在
+`%LOCALAPPDATA%\nanoamp.path`，**所以 `uninstall.exe` 仍能找到它**。
+命令行启动器也是从自身所在目录推断安装位置的，不依赖默认路径。
 
 ## `install.exe` 做了什么
 
@@ -36,9 +53,11 @@ release/
 | 1. 检查并安装 R | 先找系统里已有的 R（要求 ≥ 4.2）；找不到就用 `_offline/r/` 里的安装器静默安装 |
 | 2. 安装 R 依赖包 | 从 `_offline/r-packages/` 本地仓库安装 109 个包，**全程不联网** |
 | 3. 安装 nanoamp 主程序 | 从 `01_R-package/nanoamp_0.1.0.tar.gz` 安装 |
-| 4. 注册 `nanoamp` 命令 | 生成 `nanoamp.cmd` 并把 `%LOCALAPPDATA%\nanoamp\bin` 加入用户 PATH |
-| 5. 创建桌面快捷方式 | 指向安装好的图形界面 |
+| 4. 注册 `nanoamp` 命令 | 生成 `nanoamp.cmd` 并把 `<安装目录>\bin` 加入用户 PATH（可取消） |
+| 5. 创建桌面快捷方式 | 指向安装好的图形界面（可取消） |
 | 6. 自检 | 检查包、依赖、minimap2 是否就绪 |
+
+安装位置默认是 `%LOCALAPPDATA%\nanoamp`，**可以在窗口里改**。
 
 安装位置与副作用（**全部在用户目录内，不需要管理员权限**）：
 
@@ -55,29 +74,57 @@ release/
 用户 PATH                                         追加 %LOCALAPPDATA%\nanoamp\bin
 ```
 
-卸载：删除 `%LOCALAPPDATA%\nanoamp`、桌面快捷方式，以及 `.Renviron` 里的那一行。
+卸载：双击 `uninstall.exe`（见下文），它会自动处理上面这些位置。
 
-## 安装器的命令行用法
+## 卸载
 
-同一个 `install.exe` 也支持无界面模式，便于批量部署或排查问题：
+双击 **`uninstall.exe`**，它会：
+
+1. 显示检测到的安装位置和占用空间；
+2. 列出将要删除的内容（安装目录、桌面快捷方式、PATH 条目、`.Renviron` 行），
+   逐项可以勾选；
+3. 确认后删除，并报告释放了多少空间。
+
+**不会删除**：你自己安装的 R、你的 R 库、你的测序数据和结果文件。
+
+> 只有随程序一起装的 R（位于安装目录内的 `R\R-runtime`）才会作为可选项出现，
+> 默认不勾选。
+
+装到了非默认位置也没关系：安装器会把位置记录在
+`%LOCALAPPDATA%\nanoamp.path`；即使这个记录丢了，卸载器还会去用户 PATH
+指向的目录里按特征文件查找。
+
+## 两个 exe 的命令行用法
+
+`install.exe` 和 `uninstall.exe` 都支持无界面模式，便于批量部署或排查问题：
 
 ```bat
-install.exe --silent               :: 全自动安装，日志打印到控制台
-install.exe --silent --no-shortcut :: 不创建桌面快捷方式
-install.exe --silent --no-path     :: 不修改 PATH
-install.exe --check                :: 只报告当前安装状态，不做任何修改
+:: 安装
+install.exe --silent                          :: 全自动，日志打印到控制台
+install.exe --silent --no-shortcut            :: 不创建桌面快捷方式
+install.exe --silent --no-path                :: 不修改 PATH
+install.exe --silent --install-dir D:\nanoamp :: 指定安装位置
+install.exe --check                           :: 只报告当前安装状态
+
+:: 卸载
+uninstall.exe --dry-run                       :: 只报告会删什么，不真删
+uninstall.exe --silent                        :: 全自动卸载
+uninstall.exe --silent --keep-runtime         :: 保留随程序安装的 R
 ```
 
-> 注意：`install.exe --silent` 需要控制台窗口才能看到输出；
-> `install.exe` 不带参数时才弹图形窗口。
+> 注意：控制台模式需要能看到 stdout 的环境（普通 cmd / PowerShell 窗口），
+> 直接双击不带参数时才弹图形窗口。
 
 ## 重要：不要把 `install.exe` 单独拷走
 
-`install.exe` 只有约 10 MB，**离线依赖（约 250 MB）放在它旁边的 `_offline/` 里**。
-如果把 `install.exe` 单独复制到别处运行，它会报「安装包不完整」。
+`install.exe` 和 `uninstall.exe` 各只有约 10 MB，**离线依赖（约 250 MB）放在
+它们旁边的 `_offline/` 里**。如果把 `install.exe` 单独复制到别处运行，
+它会报「安装包不完整」。
 
-这样做是刻意的：如果把 250 MB 依赖打进 exe，每次启动都要自解压，
-既慢又占空间。整个 `release` 文件夹一起分发即可。
+这样做是刻意的：如果把 250 MB 依赖打进 exe，每次启动都要自解压，既慢又占空间。
+整个 `release` 文件夹一起分发即可。
+
+`uninstall.exe` 不依赖 `_offline/`，单独拷走也能用。
 
 ## 环境要求
 

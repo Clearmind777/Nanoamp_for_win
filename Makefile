@@ -13,7 +13,7 @@ help:
 	@echo "  make gui-exe          Rebuild 06_GUI/dist/nanoamp.exe"
 	@echo "  make gui-test         Run the Python GUI self-tests"
 	@echo "  make release          Rebuild the whole release/ tree payload"
-	@echo "  make install-exe      Rebuild release/install.exe"
+	@echo "  make install-exe      Rebuild release/install.exe and uninstall.exe"
 	@echo "  make release-test     Verify the release layout and installer logic"
 	@echo "  make deps             Show how the bundled minimap2.exe was built"
 	@echo "  make toolchain        Install the MSYS2/MINGW-w64 build toolchain"
@@ -63,7 +63,7 @@ release:
 	@echo "Now run: python release/_installer/build_installer_exe.py"
 
 install-exe:
-	python release/_installer/build_installer_exe.py
+	python release/_installer/build_exe.py
 
 release-test:
 	python release/_installer/test_installer_logic.py
@@ -71,6 +71,9 @@ release-test:
 
 release-check:
 	release/install.exe --check
+
+release-uninstall:
+	release/uninstall.exe
 
 # The Windows binary is already bundled; this only tells you how to rebuild it.
 deps:

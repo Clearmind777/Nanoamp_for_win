@@ -54,6 +54,14 @@ D:\nanoamp\
 
 会弹出安装窗口，点**「开始安装」**，然后等 3–10 分钟。
 
+窗口上方有两处可以按需调整，不确定就保持默认：
+
+| 项目 | 默认 | 说明 |
+|---|---|---|
+| **安装位置** | 当前用户目录下 | 点「修改…」可以改到 `D:\nanoamp` 这类位置。窗口会显示该磁盘剩余空间 |
+| **在桌面创建快捷方式** | ☑ 勾选 | 不想动桌面就取消勾选 |
+| **把 nanoamp 命令加入 PATH** | ☑ 勾选 | 取消勾选则命令行需要用完整路径调用 |
+
 安装程序会自动做完这些事（**全程不需要联网，不需要管理员权限**）：
 
 | 它会做的事 | 说明 |
@@ -61,15 +69,15 @@ D:\nanoamp\
 | 找到或安装 R | R 是统计分析环境，nanoamp 依赖它。找不到就自动从安装包里装 |
 | 安装 R 依赖包 | 共 109 个，全部来自安装包，不联网下载 |
 | 安装 nanoamp 主程序 | 核心分析引擎 |
-| 注册 `nanoamp` 命令 | 供命令行使用 |
-| 在桌面创建快捷方式 | 「nanoamp 分析工具」 |
+| 注册 `nanoamp` 命令 | 供命令行使用（可取消） |
+| 在桌面创建快捷方式 | 「nanoamp 分析工具」（可取消） |
 | 安装比对程序 minimap2 | 已随包提供，静态链接，无需额外配置 |
 | 最后自检 | 确认一切就绪 |
 
 安装完成后会弹提示框告诉你成功了。
 
-> 安装位置：`C:\Users\<你的用户名>\AppData\Local\nanoamp`
-> 想卸载？删掉上面这个文件夹，再删掉桌面的快捷方式即可。
+> 默认安装位置：`C:\Users\<你的用户名>\AppData\Local\nanoamp`
+> 如果你改过位置，提示框和 `install.exe --check` 都会显示实际路径。
 
 ### 第 3 步：开始分析
 
@@ -224,7 +232,17 @@ D:\nanoamp\
 
 ### 想卸载
 
-删除 `C:\Users\<你的用户名>\AppData\Local\nanoamp` 整个文件夹，再删除桌面快捷方式。
+双击安装包里的 **`uninstall.exe`**，它会显示检测到的安装位置和占用空间，
+列出将要删除的内容，确认后自动清理：
+
+- 安装目录
+- 桌面快捷方式
+- 用户 PATH 里的 nanoamp 条目
+- `.Renviron` 里的 `R_LIBS_USER` 行
+
+**你自己安装的 R、你的 R 库、你的测序数据和结果文件都不会被删除。**
+
+> 如果 nanoamp 窗口还开着，部分文件可能删不掉。关掉窗口再运行一次即可。
 
 ### 命令行里输入 `nanoamp` 提示不是内部或外部命令
 
@@ -245,7 +263,8 @@ release/             ← 发布产物：三个交付形态 + 一键安装器
   02_CLI/            命令行发行版（启动器 + 说明）
   03_GUI/            图形界面发行版（nanoamp.exe + 说明）
   install.exe        一键安装器（构建产物）
-  _installer/        安装器源码
+  uninstall.exe      一键卸载器（构建产物）
+  _installer/        安装器与卸载器源码
   _offline/          离线依赖（R 安装器、R 包、minimap2）
 02_code/             源码
   r/                 nanoamp R 包源码
@@ -304,8 +323,12 @@ R CMD build 02_code/r --no-build-vignettes
 # 图形界面 exe（需要 pip install pyinstaller）
 python 06_GUI/build_exe.py
 
-# 一键安装器 exe
-python release/_installer/build_installer_exe.py
+# 一键安装器 + 一键卸载器 exe（需要 pip install pyinstaller）
+python release/_installer/build_exe.py
+
+# 自测
+python release/_installer/test_installer_logic.py    # 安装器逻辑，不实际安装
+python release/_installer/test_release_layout.py     # 三个交付形态的布局自检
 ```
 
 ### 外部工具与平台说明

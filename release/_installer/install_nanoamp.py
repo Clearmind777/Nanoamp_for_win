@@ -37,8 +37,24 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
+
+import nanoamp_common as common
+from nanoamp_common import (
+    CONFIG_FILE,
+    PRODUCT,
+    SHORTCUT_NAME,
+    app_dir as _app_subdir,
+    bin_dir as _bin_subdir,
+    config_dir as _config_subdir,
+    desktop_dir,
+    lib_dir as _lib_subdir,
+    parse_config,
+    renviron_path,
+    shortcut_path,
+    write_pointer,
+)
 
 APP_TITLE = "nanoamp 安装程序"
 MIN_R_MAJOR = 4
@@ -76,24 +92,18 @@ def app_dir() -> Path:
 
 
 def install_home() -> Path:
-    local = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(local) / "nanoamp"
+    """Default install root (used only for the pointer file location)."""
+    return common.default_install_home()
 
 
+# Kept for backwards compatibility with the earlier release scripts; the real
+# paths are derived from the chosen install root held by Context.
 def r_lib_dir() -> Path:
-    return install_home() / "R" / "lib"
+    return _lib_subdir(install_home())
 
 
 def bin_dir() -> Path:
-    return install_home() / "bin"
-
-
-def desktop_dir() -> Path:
-    return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
-
-
-def renviron_path() -> Path:
-    return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents" / ".Renviron"
+    return _bin_subdir(install_home())
 
 
 # --------------------------------------------------------------------------
@@ -171,9 +181,31 @@ class Context:
     """Everything the steps need, resolved once at start."""
 
     root: Path
+    install_root: Path = field(default_factory=common.default_install_home)
     make_shortcut: bool = True
     touch_path: bool = True
     log: list[str] = field(default_factory=list)
+
+    # -- paths derived from the chosen install location --------------------
+    @property
+    def lib(self) -> Path:
+        return _lib_subdir(self.install_root)
+
+    @property
+    def bin(self) -> Path:
+        return _bin_subdir(self.install_root)
+
+    @property
+    def app(self) -> Path:
+        return _app_subdir(self.install_root)
+
+    @property
+    def config(self) -> Path:
+        return _config_subdir(self.install_root)
+
+    @property
+    def config_file(self) -> Path:
+        return self.install_root / CONFIG_FILE
 
     @property
     def offline(self) -> Path:
@@ -235,7 +267,7 @@ class Installer:
         self.ctx = ctx
         self.events = events
         self.rscript: Path | None = None
-        self.lib = r_lib_dir()
+        self.lib = ctx.lib          # the library is inside the chosen root
 
     @property
     def r_exe(self) -> Path:
@@ -293,7 +325,7 @@ class Installer:
         if env_extra:
             env.update(env_extra)
 
-        log_path = install_home() / "config" / f"_{tag}.log"
+        log_path = self.ctx.config / f"_{tag}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with open(log_path, "wb") as fh:
@@ -352,7 +384,7 @@ class Installer:
     # -- steps ----------------------------------------------------------
     def _preflight(self) -> None:
         self.say(f"安装程序目录 : {self.ctx.root}")
-        self.say(f"安装目标目录 : {install_home()}")
+        self.say(f"安装目标目录 : {self.ctx.install_root}")
         self.say(f"R 包库目录   : {self.lib}")
 
         missing = []
@@ -368,7 +400,7 @@ class Installer:
                 "\n\n请重新完整解压安装包后重试。"
             )
 
-        free = shutil.disk_usage(str(install_home().anchor or "C:")).free
+        free = shutil.disk_usage(str(self.ctx.install_root.anchor or "C:")).free
         need = 1500 * 1024 * 1024  # ~1.5 GB with headroom
         if free < need:
             self.say(f"警告：剩余磁盘空间 {free / 1e9:.1f} GB，建议至少 1.5 GB。")
@@ -393,7 +425,7 @@ class Installer:
             self.events.put(("ask_r",))
             return False
 
-        target = install_home() / "R"
+        target = self.ctx.install_root / "R"
         target.mkdir(parents=True, exist_ok=True)
         rdir = target / "R-runtime"
         self.say(f"正在安装 R（约需 1-3 分钟，请勿关闭窗口）…")
@@ -421,9 +453,14 @@ class Installer:
         return True
 
     def _prepare_dirs(self) -> None:
-        for d in (self.lib, bin_dir(), install_home() / "config"):
+        for d in (self.lib, self.ctx.bin, self.ctx.config):
             d.mkdir(parents=True, exist_ok=True)
         self.say(f"已创建 {self.lib}")
+
+        # Remember the chosen root so uninstall.exe can find it even when the
+        # user installed somewhere other than the default.
+        marker = write_pointer(self.ctx.install_root)
+        self.say(f"已记录安装位置到 {marker}")
 
         # Point the user's R at the nanoamp library without touching their
         # existing library, and without needing administrator rights.
@@ -502,7 +539,7 @@ if (!ok) stop("关键依赖安装后仍不可用")
         """Create the CLI driver plus nanoamp.cmd, and put it on the user PATH."""
         assert self.rscript is not None
         lib = str(self.lib).replace("\\", "/")
-        minimap2 = install_home() / "bin" / "minimap2.exe"
+        minimap2 = self.ctx.bin / "minimap2.exe"
 
         # The driver is written to a stable path that nanoamp.cmd looks for.
         # Pinning NANOAMP_MINIMAP2 here (rather than relying on PATH) means the
@@ -522,7 +559,7 @@ quit(save = "no", status = status, runLast = FALSE)
 """)
         self.say(f"已创建命令行驱动 -> {driver}")
 
-        cmd_path = bin_dir() / "nanoamp.cmd"
+        cmd_path = self.ctx.bin / "nanoamp.cmd"
         launcher = self.ctx.cli_launcher
         if launcher is not None and launcher.is_file():
             shutil.copy2(launcher, cmd_path)
@@ -537,19 +574,19 @@ quit(save = "no", status = status, runLast = FALSE)
             )
             self.say(f"已创建命令行包装（简化版） -> {cmd_path}")
 
-        added = _add_to_user_path(str(bin_dir())) if self.ctx.touch_path else False
+        added = _add_to_user_path(str(self.ctx.bin)) if self.ctx.touch_path else False
         if not self.ctx.touch_path:
             self.say("（已按参数要求跳过修改 PATH）")
         elif added:
-            self.say(f"已把 {bin_dir()} 加入用户 PATH")
+            self.say(f"已把 {self.ctx.bin} 加入用户 PATH")
             self.say("提示：新开的命令行窗口才会生效。")
         else:
-            self.say(f"{bin_dir()} 已在 PATH 中")
+            self.say(f"{self.ctx.bin} 已在 PATH 中")
 
         # Copy the bundled aligner next to the config so the R package finds it.
         mm = self.ctx.offline / "minimap2.exe"
         if mm.is_file():
-            target = install_home() / "bin" / "minimap2.exe"
+            target = self.ctx.bin / "minimap2.exe"
             shutil.copy2(mm, target)
             self.say(f"已安装比对程序 minimap2 -> {target}")
         return True
@@ -559,7 +596,7 @@ quit(save = "no", status = status, runLast = FALSE)
         if gui is None:
             self.say("安装包内没有找到图形界面 nanoamp.exe，跳过快捷方式。")
             return True
-        target_dir = install_home() / "app"
+        target_dir = self.ctx.app
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "nanoamp.exe"
         shutil.copy2(gui, target)
@@ -576,8 +613,15 @@ quit(save = "no", status = status, runLast = FALSE)
 
     def _self_check(self) -> bool:
         assert self.rscript is not None
+        lib = str(self.lib).replace("\\", "/")
+        minimap2 = str(self.ctx.bin / "minimap2.exe").replace("\\", "/")
         script = self._write_temp_r("doctor", f"""
-.libPaths(c({str(self.lib).replace(chr(92), '/')!r}, .libPaths()))
+.libPaths(c({lib!r}, .libPaths()))
+# Pin the bundled aligner explicitly. Without this, nanoamp's dependence-dir
+# search can walk up from the current working directory and pick up a
+# different minimap2.exe (for example the repository copy when install.exe is
+# run from a source checkout).
+Sys.setenv(NANOAMP_MINIMAP2 = {minimap2!r})
 suppressPackageStartupMessages(library({PACKAGE_NAME}))
 cat("{PACKAGE_NAME} 版本:", as.character(packageVersion("{PACKAGE_NAME}")), "\\n")
 for (p in c("Biostrings","Rsamtools","ShortRead","data.table")) {{
@@ -597,28 +641,30 @@ cat("  minimap2    ", if (is.null(mp)) "未找到" else mp, "\\n")
         return True
 
     def _write_config(self) -> None:
-        """Write config.ini in a format that is easy for .cmd to parse.
+        """Write config.ini in the install root, in a format .cmd can parse.
 
-        configparser would emit "rscript = D:\\..." (spaces around the "="),
-        which a ``for /f "delims=="`` loop reads as the key "rscript " and
-        therefore never matches. Writing key=value with no spaces keeps both
-        Python and the batch launcher happy.
+        ``home`` must be the *install* root, not the directory install.exe was
+        run from: the launcher and the uninstaller use it to find the
+        installation, and the two are only the same by coincidence.
+        configparser would also emit "rscript = D:\\..." with spaces, which a
+        ``for /f "delims=="`` loop reads as the key "rscript " and never
+        matches, so the file is written as plain key=value.
         """
         lines = [
             "[nanoamp]",
-            f"home={self.ctx.root}",
+            f"home={self.ctx.install_root}",
             f"rscript={self.rscript if self.rscript else ''}",
             f"rlib={self.lib}",
             f"installed_at={time.strftime('%Y-%m-%d %H:%M:%S')}",
         ]
-        path = install_home() / "config.ini"
+        path = self.ctx.config_file
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.say(f"已写入配置 {path}")
 
     # -- helpers --------------------------------------------------------
     def _write_named_r(self, name: str, body: str) -> Path:
         """Write a generated R helper to a stable, predictable path."""
-        d = install_home() / "config"
+        d = self.ctx.config
         d.mkdir(parents=True, exist_ok=True)
         path = d / name
         path.write_text(body, encoding="utf-8")
@@ -670,43 +716,49 @@ def _add_to_user_path(directory: str) -> bool:
 
 
 def _create_shortcut(target: Path, description: str) -> bool:
-    """Create a desktop .lnk via WScript.Shell (no extra dependency)."""
+    """Create a desktop .lnk via WScript.Shell (no extra dependency).
+
+    The script is written as **UTF-16LE**, not UTF-8. cscript reads a .vbs
+    using the ANSI code page by default, so a UTF-8 script containing the
+    Chinese shortcut name is decoded as mojibake and the Save() call fails
+    with "Unable to save shortcut ...\\nanoamp ????.lnk". UTF-16LE with a BOM
+    (what wscript itself emits) is read correctly on any locale.
+    """
     desktop = desktop_dir()
     if not desktop.is_dir():
         return False
-    link = desktop / "nanoamp 分析工具.lnk"
-    script = (
-        '$ws = New-Object -ComObject WScript.Shell\n'
-        f'$sc = $ws.CreateShortcut("{link}")\n'
-        f'$sc.TargetPath = "{target}"\n'
-        f'$sc.WorkingDirectory = "{target.parent}"\n'
-        f'$sc.Description = "{description}"\n'
-        '$sc.Save()\n'
-    )
-    vbs: Path | None = None
+    link = shortcut_path()
+    script = install_home() / "config" / "_shortcut.vbs"
+    script.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        'Set ws = CreateObject("WScript.Shell")',
+        f'Set sc = ws.CreateShortcut("{link}")',
+        f'sc.TargetPath = "{target}"',
+        f'sc.WorkingDirectory = "{target.parent}"',
+        f'sc.Description = "{description}"',
+        'sc.Save',
+    ]
     try:
-        # Use a .vbs so no PowerShell execution policy gets in the way.
-        vbs = install_home() / "config" / "_shortcut.vbs"
-        vbs.write_text(
-            'Set ws = CreateObject("WScript.Shell")\n'
-            f'Set sc = ws.CreateShortcut("{link}")\n'
-            f'sc.TargetPath = "{target}"\n'
-            f'sc.WorkingDirectory = "{target.parent}"\n'
-            f'sc.Description = "{description}"\n'
-            'sc.Save\n',
-            encoding="ascii",
+        # cscript expects UTF-16LE with a BOM; a UTF-8 script would have its
+        # Chinese path/name decoded as ANSI mojibake. See the docstring.
+        script.write_bytes(b"\xff\xfe" + "\r\n".join(lines).encode("utf-16-le")
+                           + "\r\n".encode("utf-16-le"))
+        proc = subprocess.run(
+            ["cscript", "//nologo", str(script)],
+            capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW,
         )
-        subprocess.run(["cscript", "//nologo", str(vbs)],
-                       capture_output=True, timeout=60,
-                       creationflags=CREATE_NO_WINDOW)
+        if proc.returncode != 0 or not link.is_file():
+            detail = (proc.stdout or b"").decode("utf-8", "replace").strip()
+            if detail:
+                print(f"shortcut creation reported: {detail}")
     except (OSError, subprocess.SubprocessError):
         return False
     finally:
-        if vbs is not None and vbs.exists():
-            try:
-                vbs.unlink()
-            except OSError:
-                pass
+        try:
+            script.unlink()
+        except OSError:
+            pass
     return link.is_file()
 
 
@@ -717,9 +769,12 @@ class InstallerWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("720x520")
-        self.root.minsize(640, 460)
+        self.root.geometry("760x640")
+        self.root.minsize(680, 580)
         self.events: queue.Queue = queue.Queue()
+        self.var_install_root = tk.StringVar(value=str(common.default_install_home()))
+        self.var_shortcut = tk.BooleanVar(value=True)
+        self.var_path = tk.BooleanVar(value=True)
         self.ctx = Context(root=app_dir())
         self.worker: threading.Thread | None = None
         self._build()
@@ -738,8 +793,41 @@ class InstallerWindow:
             justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
+        # -- install location ------------------------------------------------
+        loc = ttk.LabelFrame(self.root, text="安装位置", padding=8)
+        loc.pack(fill="x", padx=pad, pady=(8, 0))
+        loc.columnconfigure(0, weight=1)
+        row = ttk.Frame(loc)
+        row.grid(row=0, column=0, sticky="ew")
+        row.columnconfigure(0, weight=1)
+        self.entry_root = ttk.Entry(row, textvariable=self.var_install_root)
+        self.entry_root.grid(row=0, column=0, sticky="ew")
+        ttk.Button(row, text="修改…", command=self._pick_install_root).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(row, text="恢复默认", command=self._reset_install_root).grid(row=0, column=2, padx=(6, 0))
+        ttk.Label(
+            loc,
+            text="默认装在当前用户目录下，不需要管理员权限。"
+                 "也可以改到 D:\\nanoamp 这类位置（路径请避免中文和空格）。",
+            font=("Microsoft YaHei UI", 8),
+            foreground="#666666",
+            wraplength=690,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self.lbl_space = ttk.Label(loc, text="", font=("Microsoft YaHei UI", 8), foreground="#666666")
+        self.lbl_space.grid(row=2, column=0, sticky="w", pady=(2, 0))
+        self.var_install_root.trace_add("write", lambda *_: self._update_space())
+
+        # -- options ---------------------------------------------------------
+        opts = ttk.LabelFrame(self.root, text="选项", padding=8)
+        opts.pack(fill="x", padx=pad, pady=(8, 0))
+        ttk.Checkbutton(opts, text="在桌面创建快捷方式（推荐）",
+                        variable=self.var_shortcut).pack(anchor="w")
+        ttk.Checkbutton(opts, text="把 nanoamp 命令加入用户 PATH（推荐）",
+                        variable=self.var_path).pack(anchor="w")
+
         self.step_label = ttk.Label(self.root, text="准备就绪，点击下方按钮开始安装。",
-                                    font=("Microsoft YaHei UI", 10), padding=(pad, 4))
+                                    font=("Microsoft YaHei UI", 10), padding=(pad, 6))
         self.step_label.pack(anchor="w")
 
         self.progress = ttk.Progressbar(self.root, mode="determinate", maximum=6)
@@ -770,10 +858,78 @@ class InstallerWindow:
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
+    # -- install location -----------------------------------------------
+    def _pick_install_root(self) -> None:
+        """Let the user choose where to install.
+
+        A directory chooser is used, but the user may want to create a new
+        folder, so falling back to a typed path is supported too.
+        """
+        current = self.var_install_root.get().strip() or str(common.default_install_home())
+        chosen = filedialog.askdirectory(
+            title="选择安装位置（选中一个文件夹，nanoamp 会装在里面）",
+            initialdir=current if Path(current).is_dir() else str(Path(current).parent),
+            mustexist=False,
+        )
+        if not chosen:
+            return
+        # If the user picked an existing folder, install *into* a nanoamp
+        # subfolder rather than scattering files across it.
+        picked = Path(chosen)
+        if picked.name.lower() != PRODUCT:
+            picked = picked / PRODUCT
+        self.var_install_root.set(str(picked))
+        self._update_space()
+
+    def _reset_install_root(self) -> None:
+        self.var_install_root.set(str(common.default_install_home()))
+        self._update_space()
+
+    def _update_space(self) -> None:
+        """Show where it will go and whether that drive has room."""
+        target = Path(self.var_install_root.get().strip() or ".")
+        try:
+            anchor = target.anchor or "C:\\"
+            free = shutil.disk_usage(anchor).free
+            need = 1500 * 1024 * 1024
+            text = f"将安装到：{target}    该磁盘剩余 {free / 1e9:.1f} GB"
+            if free < need:
+                text += "  （不足，建议至少 1.5 GB）"
+            self.lbl_space.configure(text=text, foreground="#b00020" if free < need else "#666666")
+        except OSError:
+            self.lbl_space.configure(text=f"将安装到：{target}", foreground="#b00020")
+
     # -- control --------------------------------------------------------
     def _start(self) -> None:
         if self.worker and self.worker.is_alive():
             return
+
+        root_text = self.var_install_root.get().strip()
+        if not root_text:
+            messagebox.showwarning(APP_TITLE, "请先选择安装位置。")
+            return
+        target = Path(root_text)
+        if any(ch in str(target) for ch in '<>:"|?*'):
+            messagebox.showerror(APP_TITLE, f"安装路径含有非法字符：\n{target}")
+            return
+
+        # Warn before clobbering an existing install in a different place.
+        existing = common.find_existing_install()
+        if existing and Path(existing[0]).resolve() != target.resolve():
+            if not messagebox.askyesno(
+                APP_TITLE,
+                f"检测到已有一份 nanoamp 安装在：\n{existing[0]}\n\n"
+                f"继续会在新位置再装一份（旧的那份需要另行卸载）。\n\n是否继续？",
+            ):
+                return
+
+        self.ctx.install_root = target
+        self.ctx.make_shortcut = bool(self.var_shortcut.get())
+        self.ctx.touch_path = bool(self.var_path.get())
+
+        for w in (self.entry_root,):
+            w.configure(state="disabled")
+
         self.btn.configure(state="disabled")
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
@@ -823,29 +979,47 @@ class InstallerWindow:
             "如果安装包里有 _offline/r 文件夹，也可以把 R 安装器放进去后重试。",
         )
         if again:
+            self._rearm()
             self._start()
+
+    def _rearm(self) -> None:
+        """Re-enable the controls and rerun the pre-install checks."""
+        try:
+            self.entry_root.configure(state="normal")
+        except tk.TclError:
+            pass
+        self.btn.configure(state="normal")
 
     def _finish(self, ok: bool) -> None:
         self.btn.configure(state="normal")
         self.progress.configure(value=self.progress.cget("maximum"))
         if ok:
             self.step_label.configure(text="安装完成。")
-            gui = install_home() / "app" / "nanoamp.exe"
+            gui = self.ctx.app / "nanoamp.exe"
+            steps = []
+            if self.ctx.make_shortcut:
+                steps.append("1）双击桌面上的「nanoamp 分析工具」打开图形界面；")
+            else:
+                steps.append(f"1）双击这个文件打开图形界面：\n   {gui}")
+            steps.append("2）选好测序文件和目的序列，点「开始分析」；")
+            steps.append("3）结果会显示在同一个窗口里。")
+            tail = [f"\n安装位置：{self.ctx.install_root}"]
+            if self.ctx.touch_path:
+                tail.append("命令行用法：新开一个命令行窗口，输入 nanoamp doctor")
+            else:
+                tail.append(f"命令行用法：{self.ctx.bin}\\nanoamp.cmd doctor（未加入 PATH）")
             messagebox.showinfo(
                 APP_TITLE,
-                "安装完成！\n\n"
-                "接下来可以这样使用：\n\n"
-                "1）双击桌面上的“nanoamp 分析工具”打开图形界面；\n"
-                "2）选好测序文件和目的序列，点“开始分析”；\n"
-                "3）结果会显示在同一个窗口里。\n\n"
-                f"图形界面位置：{gui}\n"
-                f"命令行用法：在新开的命令行窗口输入 nanoamp doctor",
+                "安装完成！\n\n接下来可以这样使用：\n\n"
+                + "\n".join(steps)
+                + "\n"
+                + "\n".join(tail),
             )
         else:
             self.step_label.configure(text="安装未全部成功，请查看安装详情。")
             messagebox.showwarning(
                 APP_TITLE,
-                "安装没有完全成功。\n\n请查看“安装详情”里的信息，或重试一次。",
+                "安装没有完全成功。\n\n请查看「安装详情」里的信息，或修好问题后重试一次。",
             )
 
     def run(self) -> int:
@@ -870,11 +1044,22 @@ def _configure_console() -> None:
 
 def _report_status() -> int:
     """Print what is currently installed. Exit 0 if usable, 2 otherwise."""
-    home = install_home()
-    lib = r_lib_dir()
     ok = True
 
+    found = common.find_existing_install()
+    if found is None:
+        home = install_home()
+        print(f"nanoamp 安装目录 : {home}  {'存在' if home.is_dir() else '不存在'}")
+        print("\n状态：未安装（没有找到 config.ini）")
+        return 2
+
+    home, cfg = found
+    lib = _lib_subdir(home)
+    installed = common.looks_installed(home)
     print(f"nanoamp 安装目录 : {home}  {'存在' if home.is_dir() else '不存在'}")
+    if not installed:
+        ok = False
+        print("                  （该目录下没有找到已安装的 nanoamp）")
 
     rscript = find_rscript()
     if rscript:
@@ -892,38 +1077,51 @@ def _report_status() -> int:
     if not pkg.is_dir():
         ok = False
 
-    exe = home / "app" / "nanoamp.exe"
+    exe = _app_subdir(home) / "nanoamp.exe"
     print(f"图形界面         : {'已安装' if exe.is_file() else '未安装'}  ({exe})")
 
-    cmd = bin_dir() / "nanoamp.cmd"
+    cmd = _bin_subdir(home) / "nanoamp.cmd"
     print(f"命令行包装       : {'已安装' if cmd.is_file() else '未安装'}  ({cmd})")
 
-    mm = home / "bin" / "minimap2.exe"
+    mm = _bin_subdir(home) / "minimap2.exe"
     print(f"比对程序         : {'已安装' if mm.is_file() else '未安装'}  ({mm})")
 
-    link = desktop_dir() / "nanoamp 分析工具.lnk"
+    link = shortcut_path()
     print(f"桌面快捷方式     : {'已创建' if link.is_file() else '未创建'}")
 
-    cfg = home / "config.ini"
-    if cfg.is_file():
-        print(f"配置文件         : {cfg}")
-        print(cfg.read_text(encoding="utf-8").strip())
+    cfg_path = home / CONFIG_FILE
+    if cfg_path.is_file():
+        print(f"配置文件         : {cfg_path}")
+        print(cfg_path.read_text(encoding="utf-8").strip())
 
     print("\n状态：" + ("可用" if ok else "不完整，请重新运行安装程序"))
     return 0 if ok else 2
 
 
+def _parse_install_dir(argv: list[str]) -> Path | None:
+    """Read ``--install-dir <path>`` from the command line."""
+    for i, arg in enumerate(argv):
+        if arg == "--install-dir" and i + 1 < len(argv):
+            return Path(argv[i + 1])
+        if arg.startswith("--install-dir="):
+            return Path(arg.split("=", 1)[1])
+    return None
+
+
 def main() -> int:
     """Entry point.
 
-    With no arguments the graphical installer opens. The console modes exist
-    so the same code path can be exercised without a display (CI, testing, or
-    an administrator running it from a script):
+    With no arguments the graphical installer opens, where the install
+    location and the desktop-shortcut option can be changed.
 
-        install.exe --silent             install everything, report on stdout
-        install.exe --check              report what is installed and exit
-        install.exe --no-shortcut        silently, but skip the desktop shortcut
-        install.exe --no-path            silently, but do not touch PATH
+    The console modes exist so the same code path can be exercised without a
+    display (CI, testing, deployment scripts):
+
+        install.exe --silent                    install, report on stdout
+        install.exe --check                     report what is installed
+        install.exe --silent --no-shortcut      skip the desktop shortcut
+        install.exe --silent --no-path          do not touch PATH
+        install.exe --silent --install-dir D:\\nanoamp
     """
     argv = sys.argv[1:]
 
@@ -933,8 +1131,10 @@ def main() -> int:
 
     if "--silent" in argv:
         _configure_console()
+        chosen = _parse_install_dir(argv)
         ctx = Context(
             root=app_dir(),
+            install_root=chosen if chosen else common.default_install_home(),
             make_shortcut="--no-shortcut" not in argv,
             touch_path="--no-path" not in argv,
         )
