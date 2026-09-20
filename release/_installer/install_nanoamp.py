@@ -959,8 +959,21 @@ class InstallerWindow:
             messagebox.showwarning(APP_TITLE, "请先选择安装位置。")
             return
         target = Path(root_text)
-        if any(ch in str(target) for ch in '<>:"|?*'):
-            messagebox.showerror(APP_TITLE, f"安装路径含有非法字符：\n{target}")
+        illegal = _illegal_path_chars(target)
+        if illegal:
+            messagebox.showerror(
+                APP_TITLE,
+                f"安装路径含有不能用于文件名的字符：{' '.join(illegal)}\n\n"
+                f"{target}\n\n"
+                "请改用只含字母、数字、空格和普通符号的路径。",
+            )
+            return
+        if target.exists() and not target.is_dir():
+            messagebox.showerror(
+                APP_TITLE,
+                f"这个位置已经有一个同名文件：\n{target}\n\n"
+                "请换一个目录，或先改名/删除那个文件。",
+            )
             return
 
         # Warn before clobbering an existing install in a different place.
@@ -1076,6 +1089,20 @@ class InstallerWindow:
         self.fit_to_content()
         self.root.mainloop()
         return 0
+
+
+def _illegal_path_chars(target: Path) -> list[str]:
+    """Characters in *target* that Windows cannot store in a file name.
+
+    The drive anchor must be excluded before checking. ``Path("C:/x").anchor``
+    is ``"C:\\\\"`` -- a drive letter legitimately contains a colon -- so testing
+    the whole string for ':' rejected *every* path, including the default one,
+    and the installer refused to start at all.
+
+    Returns the offending characters (empty list means the path is usable).
+    """
+    body = str(target)[len(target.anchor):]
+    return sorted({ch for ch in '<>:"|?*' if ch in body})
 
 
 def _drive_free_for(target: Path) -> int | None:
