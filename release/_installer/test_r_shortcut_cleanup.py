@@ -71,6 +71,19 @@ class Sandbox:
 
 def main() -> int:
     failures: list[str] = []
+
+    # --- the installer must actually ask R not to make icons ---------------
+    # Cheap structural check: no installation, no side effects. When _ensure_r
+    # runs the R installer, the command must carry the task exclusion.
+    source = (Path(__file__).resolve().parent / "install_nanoamp.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    merged = 'MERGETASKS="!desktopicon,!quicklaunchicon"'
+    if merged not in source:
+        failures.append("R installer invocation lost its /MERGETASKS exclusion")
+    else:
+        print("  ok    installer passes /MERGETASKS=!desktopicon,!quicklaunchicon")
+
     tmp = Path(tempfile.mkdtemp(prefix="nanoamp-lnk-"))
     try:
         with Sandbox(tmp) as box:

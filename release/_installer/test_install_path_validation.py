@@ -102,10 +102,13 @@ def check_real_handler() -> list[str]:
         "showinfo": ins.messagebox.showinfo,
         "askyesno": ins.messagebox.askyesno,
     }
+    real_run_all = ins.Installer.run_all
     ins.messagebox.showerror = lambda t, m, **k: shown.append(("error", m))
     ins.messagebox.showwarning = lambda t, m, **k: shown.append(("warning", m))
     ins.messagebox.showinfo = lambda t, m, **k: shown.append(("info", m))
     ins.messagebox.askyesno = lambda t, m, **k: shown.append(("ask", m)) or False
+    # Never actually install: this test is about the validation dialog only.
+    ins.Installer.run_all = lambda self: True
 
     window = None
     try:
@@ -117,15 +120,18 @@ def check_real_handler() -> list[str]:
             shown.clear()
             window = ins.InstallerWindow()
             window.var_install_root.set(path)
-            # Replace the worker body so clicking 开始安装 cannot touch the
-            # machine; validation runs before the thread is started.
-            window._run = lambda *a, **k: None  # type: ignore[method-assign]
+            # 开始安装 validates the path and then starts Installer.run_all in a
+            # daemon thread. Patch that at class level BEFORE _start, otherwise
+            # the thread really begins installing: it creates the install
+            # directories and rewrites the developer's Documents\.Renviron.
             window._start()
             illegal = [m for kind, m in shown if "非法字符" in m]
             print(f"  handler with {label:8} -> dialogs={[k for k, _ in shown]} "
                   f"accepted={window.worker is not None}")
             if illegal:
                 problems.append(f"{path}: handler still rejects a legal path")
+            if window.worker is not None:
+                window.worker.join(timeout=10)
             window.root.destroy()
             window = None
     except tk.TclError as exc:
@@ -138,6 +144,7 @@ def check_real_handler() -> list[str]:
                 pass
         for name, fn in real.items():
             setattr(ins.messagebox, name, fn)
+        ins.Installer.run_all = real_run_all
     return problems
 
 
