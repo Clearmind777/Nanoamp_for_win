@@ -46,7 +46,38 @@ def resource_base() -> Path:
 
 
 def find_repo_root(start: Path) -> Path:
-    """Walk upwards looking for the repository root."""
+    """Locate the nanoamp working directory.
+
+    Resolution order:
+
+    1. ``NANOAMP_HOME`` environment variable, if set;
+    2. ``%LOCALAPPDATA%\\nanoamp\\config.ini``, written by install.exe - this is
+       how an installed nanoamp.exe finds the data directory it was installed
+       against, since the exe no longer lives inside that directory;
+    3. walking upwards from ``start`` looking for a repository marker.
+
+    Returning the wrong directory is recoverable: the window still opens and
+    the user can pick any input/output paths by hand. Only the bundled
+    minimap2.exe lookup and the default output directory depend on it.
+    """
+    env = os.environ.get("NANOAMP_HOME")
+    if env and Path(env).is_dir():
+        return Path(env).resolve()
+
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        ini = Path(local) / "nanoamp" / "config.ini"
+        if ini.is_file():
+            try:
+                for line in ini.read_text(encoding="utf-8").splitlines():
+                    if line.strip().startswith("home"):
+                        _, _, value = line.partition("=")
+                        candidate = Path(value.strip().strip('"'))
+                        if candidate.is_dir():
+                            return candidate.resolve()
+            except OSError:
+                pass
+
     p = start.resolve()
     for _ in range(8):
         if (p / "03_dependence").is_dir() or (p / "02_code").is_dir():
@@ -58,13 +89,23 @@ def find_repo_root(start: Path) -> Path:
 
 
 def latest_outdir(repo_root: Path) -> Path:
-    """Default output directory: the newest runnable place we can write to."""
-    candidate = repo_root / "04_results" / "gui"
+    """Pick a sensible default output directory.
+
+    A researcher using the installed GUI does not want results buried inside
+    C:\\Users\\...\\AppData, so they go to ``Documents\\nanoamp 结果``. The
+    repository layout (a checkout, where 04_results/ exists) is kept working
+    for development.
+    """
+    if (repo_root / "04_results").is_dir():
+        candidate = repo_root / "04_results" / "gui"
+    else:
+        docs = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents"
+        candidate = docs / "nanoamp 结果"
     try:
         candidate.mkdir(parents=True, exist_ok=True)
         return candidate
     except OSError:
-        return repo_root / "06_GUI"
+        return repo_root
 
 
 class NanoampApp(ttk.Frame):
