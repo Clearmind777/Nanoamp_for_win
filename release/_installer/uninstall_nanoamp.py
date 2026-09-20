@@ -46,6 +46,13 @@ from nanoamp_common import (
 APP_TITLE = "nanoamp 卸载程序"
 CREATE_NO_WINDOW = 0x08000000
 
+# Fixed width for the window; fit_to_content() only varies the height.
+WINDOW_WIDTH = 760
+
+# A file can stay locked for a moment after the process holding it exits.
+# Delays before each delete attempt; the list length is the attempt count.
+REMOVE_RETRY_DELAYS = (0.0, 1.0, 2.0, 4.0, 8.0)
+
 # Refuse to delete anything at or above these; a bad config.ini must never be
 # able to wipe a system directory.
 FORBIDDEN = {
@@ -99,6 +106,18 @@ def _count_files(root: Path) -> int:
         return sum(1 for p in root.rglob("*") if p.is_file())
     except OSError:
         return 0
+
+
+def _human_size(size: int) -> str:
+    """Byte count in the largest unit that keeps it readable.
+
+    Rounding small installs to "0 MB" reads like a bug, so anything under a
+    megabyte is reported in KB.
+    """
+    mb = size / 1024 / 1024
+    if mb >= 1:
+        return f"{mb:.0f} MB"
+    return f"{max(round(size / 1024), 1)} KB"
 
 
 def _size_of(root: Path) -> int:
@@ -245,20 +264,66 @@ class Uninstaller:
         self.freed += _size_of(root)
         self.say(f"正在删除 {root} …")
 
-        # A freshly used GUI or a loaded DLL can hold files briefly.
+        # The GUI is very likely still running when someone uninstalls (it is
+        # what they just closed, or they forgot). Its nanoamp.exe would be
+        # locked, so stop our own processes first.
+        self._stop_running_background_processes()
+
+        # A file can stay locked briefly while Windows releases the handle.
+        # Retry with a growing delay rather than giving up on the first error.
         last_error: Exception | None = None
-        for attempt in range(4):
+        for attempt, delay in enumerate(REMOVE_RETRY_DELAYS, start=1):
+            if delay:
+                time.sleep(delay)
             try:
-                shutil.rmtree(root, onerror=_on_rm_error)
-                self.say("安装目录已删除")
+                _remove_tree(root)
+                self.say(f"安装目录已删除（第 {attempt} 次尝试）")
                 return True
             except OSError as exc:
                 last_error = exc
-                self.say(f"  第 {attempt + 1} 次删除未完成：{exc}")
-                time.sleep(1.5)
+                blocked = _blocking_files(root)
+                detail = ("，被占用：" + ", ".join(blocked[:3])) if blocked else ""
+                self.say(f"  第 {attempt}/{len(REMOVE_RETRY_DELAYS)} 次删除未完成：{exc}{detail}")
         self.say(f"删除失败：{last_error}")
-        self.say("提示：请先关闭正在运行的 nanoamp 窗口后重试，或手工删除该目录。")
+        self.say("提示：请关闭正在运行的 nanoamp 窗口后重新运行本程序，或手工删除该目录。")
         return False
+
+    def _stop_running_background_processes(self) -> None:
+        """Stop nanoamp processes we may have started.
+
+        Only matched by full image path inside the install root, so an
+        unrelated program with a similar name is never touched.
+        """
+        if self.plan.install_root is None:
+            return
+        root = self.plan.install_root.resolve()
+        import csv
+        import io
+
+        try:
+            proc = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, timeout=30, creationflags=CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return
+        text = (proc.stdout or b"").decode("utf-8", errors="replace")
+        for row in csv.reader(io.StringIO(text)):
+            if len(row) < 2:
+                continue
+            name, pid = row[0], row[1]
+            if not name.lower().startswith("nanoamp"):
+                continue
+            try:
+                exe_path = _process_image_path(int(pid))
+            except (ValueError, OSError):
+                continue
+            if exe_path and root in Path(exe_path).resolve().parents:
+                self.say(f"  结束仍在运行的 {name}（PID {pid}）")
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                               capture_output=True, timeout=30,
+                               creationflags=CREATE_NO_WINDOW)
+                time.sleep(0.5)
 
     def _remove_shortcut(self) -> bool:
         if not self.plan.remove_shortcut:
@@ -328,12 +393,39 @@ class Uninstaller:
         self.freed += _size_of(root)
         self.say(f"正在删除 R 运行时 {root} …")
         try:
-            shutil.rmtree(root, onerror=_on_rm_error)
+            _remove_tree(root)
             self.say("R 运行时已删除")
             return True
         except OSError as exc:
             self.say(f"删除 R 运行时失败：{exc}")
             return False
+
+
+def _remove_tree(root: Path) -> None:
+    """shutil.rmtree that reliably reports failure.
+
+    The classic ``onerror=lambda *a: chmod(...)`` recipe is silent: when the
+    retry fails too, shutil just carries on and rmtree returns normally with
+    the directory still there.  That would make the caller's retry loop think
+    it had succeeded, so this wrapper records the first failure and raises it
+    unless the directory really is gone.
+    """
+    failed: list[BaseException] = []
+
+    def _on_error(func, path, exc_info) -> None:
+        exc = exc_info[1] if len(exc_info) > 1 else None
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+            return
+        except OSError:
+            pass
+        if exc is not None and not failed:
+            failed.append(exc)
+
+    shutil.rmtree(root, onerror=_on_error)
+    if root.exists():
+        raise failed[0] if failed else OSError(f"目录未能完全删除：{root}")
 
 
 def _on_rm_error(func, path, exc_info) -> None:
@@ -343,6 +435,60 @@ def _on_rm_error(func, path, exc_info) -> None:
         func(path)
     except OSError:
         pass
+
+
+def _process_image_path(pid: int) -> str:
+    """Full path of a running process image, or '' when not readable.
+
+    Uses WMIC-free ctypes so it works on every Windows 10/11 without extra
+    tooling; falls back to an empty string if the query is refused.
+    """
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        size = ctypes.c_ulong(32768)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return buf.value
+    finally:
+        kernel32.CloseHandle(handle)
+    return ""
+
+
+def _blocking_files(root: Path) -> list[str]:
+    """Best-effort list of what could not be deleted under *root*.
+
+    Whatever is still there after a failed rmtree is exactly what stood in the
+    way, which is more precise than probing file handles (Windows happily lets
+    you reopen a file whose deletion is only blocked by a byte-range lock).
+    A directory that cannot even be listed is reported as ``name/``.
+    """
+    offenders: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in filenames:
+            target = os.path.join(dirpath, name)
+            try:
+                with open(target, "a"):
+                    pass
+            except OSError:
+                offenders.append(_rel(target, root))
+        for name in dirnames:
+            target = os.path.join(dirpath, name)
+            try:
+                os.listdir(target)
+            except OSError:
+                offenders.append(_rel(target, root) + "\\")
+    return offenders
+
+
+def _rel(target: str, root: Path) -> str:
+    try:
+        return os.path.relpath(target, root)
+    except ValueError:
+        return target
 
 
 def _remove_from_user_path(entry: str) -> bool:
@@ -374,6 +520,8 @@ class UninstallWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
+        # A starting size only; fit_to_content() sets the real one once the
+        # widgets have reported how tall they need to be.
         self.root.geometry("720x600")
         self.root.minsize(660, 540)
         self.events: queue.Queue = queue.Queue()
@@ -402,9 +550,12 @@ class UninstallWindow:
         info.pack(fill="x", padx=pad, pady=(8, 0))
         if self.plan.install_root:
             size = _size_of(self.plan.install_root) if self.plan.install_root.is_dir() else 0
+            # A deep install path is common (and the sandbox ones are long), so
+            # wrap it instead of letting it run out of the window.
             ttk.Label(info, text=f"安装目录：{self.plan.install_root}",
-                      font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
-            ttk.Label(info, text=f"占用约 {size / 1024 / 1024:.0f} MB",
+                      font=("Microsoft YaHei UI", 10, "bold"),
+                      wraplength=WINDOW_WIDTH - 60, justify="left").pack(anchor="w")
+            ttk.Label(info, text=f"占用约 {_human_size(size)}",
                       font=("Microsoft YaHei UI", 8), foreground="#666666").pack(anchor="w")
         else:
             ttk.Label(info, text="没有检测到已安装的 nanoamp。",
@@ -426,11 +577,17 @@ class UninstallWindow:
         if self.plan.remove_renviron_line:
             ttk.Checkbutton(opts, text=".Renviron 中的 R_LIBS_USER 行", variable=self.var_renviron).pack(anchor="w")
         if self.plan.runtime_root:
-            ttk.Checkbutton(
-                opts,
-                text=f"随程序安装的 R 运行时（{self.plan.runtime_root}）",
-                variable=self.var_runtime,
-            ).pack(anchor="w")
+            # A full path next to a checkbox is wider than the window and gets
+            # silently cut off, so the label stays short and the path wraps on
+            # its own indented line.
+            row = ttk.Frame(opts)
+            row.pack(anchor="w", fill="x")
+            ttk.Checkbutton(row, text="随程序安装的 R 运行时",
+                            variable=self.var_runtime).pack(side="left")
+            ttk.Label(opts, text=str(self.plan.runtime_root),
+                      font=("Microsoft YaHei UI", 8), foreground="#666666",
+                      wraplength=WINDOW_WIDTH - 90, justify="left").pack(
+                anchor="w", padx=(24, 0))
 
         keep = ttk.LabelFrame(self.root, text="不会删除", padding=8)
         keep.pack(fill="x", padx=pad, pady=(8, 0))
@@ -443,20 +600,24 @@ class UninstallWindow:
         self.progress = ttk.Progressbar(self.root, mode="determinate", maximum=4)
         self.progress.pack(fill="x", padx=pad)
 
+        # The buttons are packed first with side="bottom" on purpose: the log
+        # below can then absorb whatever height is left. Packing them last
+        # pushes them outside the window whenever the content is tall, which
+        # hides the only way to actually start the uninstall.
+        bar = ttk.Frame(self.root, padding=(pad, 0, pad, pad))
+        bar.pack(side="bottom", fill="x")
+        self.btn = ttk.Button(bar, text="开始卸载", command=self._start)
+        self.btn.pack(side="left")
+        ttk.Button(bar, text="取消", command=self.root.destroy).pack(side="right")
+
         log_frame = ttk.LabelFrame(self.root, text="详情", padding=4)
-        log_frame.pack(fill="both", expand=True, padx=pad, pady=(8, 6))
+        log_frame.pack(side="bottom", fill="both", expand=True, padx=pad, pady=(8, 6))
         self.log_text = tk.Text(log_frame, wrap="word", height=9, font=("Consolas", 9),
                                 state="disabled")
         self.log_text.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         sb.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=sb.set)
-
-        bar = ttk.Frame(self.root, padding=(pad, 0, pad, pad))
-        bar.pack(fill="x")
-        self.btn = ttk.Button(bar, text="开始卸载", command=self._start)
-        self.btn.pack(side="left")
-        ttk.Button(bar, text="取消", command=self.root.destroy).pack(side="right")
 
         self.root.after(120, self._pump)
 
@@ -465,6 +626,37 @@ class UninstallWindow:
         self.log_text.insert("end", text + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+
+    def fit_to_content(self) -> None:
+        """Size the window to what it shows, and keep the buttons on screen.
+
+        A fixed geometry assumes the layout always needs the same height, which
+        stopped being true as soon as the "detected install" box appeared. This
+        lets the log pane absorb the slack instead, and shrinks it on a small
+        screen so nothing important falls off the bottom.
+        """
+        text = self.log_text
+        wanted = text.cget("height")
+        try:
+            text.configure(height=3)
+            self.root.update_idletasks()
+            minimum = self.root.winfo_reqheight()
+
+            text.configure(height=wanted)
+            self.root.update_idletasks()
+            natural = self.root.winfo_reqheight()
+
+            screen_h = self.root.winfo_screenheight()
+            avail = (screen_h - 90) - (minimum - 3 * 22)
+            lines = max(3, min(wanted, avail // 22))
+            text.configure(height=lines)
+            self.root.update_idletasks()
+            height = max(minimum, min(self.root.winfo_reqheight(), screen_h - 90))
+
+            self.root.geometry(f"{WINDOW_WIDTH}x{height}+"
+                               f"{max((self.root.winfo_screenwidth() - WINDOW_WIDTH) // 2, 0)}+30")
+        finally:
+            text.configure(height=wanted)
 
     def _start(self) -> None:
         if self.worker and self.worker.is_alive():
@@ -537,6 +729,7 @@ class UninstallWindow:
             )
 
     def run(self) -> int:
+        self.fit_to_content()
         self.root.mainloop()
         return 0
 

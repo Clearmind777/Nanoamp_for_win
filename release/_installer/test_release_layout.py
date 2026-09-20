@@ -70,11 +70,11 @@ if cmd.is_file():
 
 print("\n=== 4) GUI 版：exe 与仓库内产物一致 ===")
 gui_rel = RELEASE / "03_GUI" / "nanoamp.exe"
-gui_dev = REPO / "06_GUI" / "dist" / "nanoamp.exe"
+gui_dev = REPO / "02_code/PythonGUI" / "dist" / "nanoamp.exe"
 check(gui_rel.is_file(), "release/03_GUI/nanoamp.exe 存在")
 if gui_rel.is_file() and gui_dev.is_file():
     same = sha256(gui_rel) == sha256(gui_dev)
-    check(same, "与 06_GUI/dist/nanoamp.exe 一致",
+    check(same, "与 02_code/PythonGUI/dist/nanoamp.exe 一致",
           "" if same else f"{sha256(gui_rel)[:16]} vs {sha256(gui_dev)[:16]}")
 
 print("\n=== 5) 离线依赖完整 ===")

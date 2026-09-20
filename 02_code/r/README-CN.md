@@ -33,7 +33,7 @@ install.packages(c("shiny", "DT"))
 从构建好的 tar.gz 安装（例如 `make check` 生成的包；版本号按实际情况调整）：
 
 ```r
-install.packages("05_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("04_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
 ```
 
 从源码目录安装：
@@ -295,7 +295,7 @@ R 内后端使用 Biostrings 成对比对，不需要外部工具；速度较慢
 2. 修改 `inst/scripts/run_analysis.R` 顶部的 `CONFIG`；
 3. 运行整个脚本。
 
-脚本会自动寻找项目根目录，并把结果写到 `04_results/r/`。
+脚本会自动寻找项目根目录，并把结果写到 `tmp/test_results/r/`。
 
 ## 使用测试数据
 
@@ -324,7 +324,7 @@ library(nanoamp)
 res <- run_haplotype_analysis(
   reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
   reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
-  outdir    = "04_results/r/demo/E4-3",
+  outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 ```
@@ -343,7 +343,7 @@ devtools::test("02_code/r")
 
 ```bash
 Rscript 02_code/r/inst/scripts/run_functional_tests.R \
-  --outdir 04_results/r/test_run_2 --modes A,B,C --threads 4
+  --outdir tmp/test_results/r/test_run_2 --modes A,B,C --threads 4
 ```
 
 本包已通过 `R CMD check`，当前结果为 `Status: OK`。

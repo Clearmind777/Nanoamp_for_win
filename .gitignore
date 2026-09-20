@@ -29,10 +29,10 @@ renv/library/
 
 # ---- è¿è¡Œè¾“å‡ºä¸ä¸´æ—¶æ–‡ä»¶ ----
 tmp/
-04_results/*
-!04_results/README.md
-05_builds/*
-!05_builds/README.md
+tmp/test_results/*
+!tmp/test_results/README.md
+04_builds/*
+!04_builds/README.md
 *.tmp
 *.log
 
@@ -43,6 +43,3 @@ tmp/
 # ---- R æ„å»ºäº§ç‰© ----
 *.Rcheck/
 nanoamp_*.tar.gz
-
-# ---- ÀëÏß°²×°°ü£¨Ìå»ı´ó£¬Ä¬ÈÏ²»Èë¿â£©----
-dist/

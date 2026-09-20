@@ -38,7 +38,7 @@ External tools are bundled under `03_dependence/` at the repository root.
 2. **Shared contracts**: parameter names, defaults and output columns are
    defined once in `shared/`.
 3. **Data and code are separate**: test data lives in `01_data/`; run outputs
-   live in `04_results/<front-end>/`.
+   live in `tmp/test_results/<front-end>/`.
 4. **Windows first for the GUI**: the GUI is built with Shiny so it runs on
    Windows, and can be packaged with RInno later.
 5. **Bundled tools first**: external tools are resolved from
@@ -58,7 +58,7 @@ nanoamp call \
   --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq \
   --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa \
   --mode A --top-n 20 \
-  --outdir 04_results/r/demo/E4-3
+  --outdir tmp/test_results/r/demo/E4-3
 ```
 
 R console:
@@ -68,7 +68,7 @@ library(nanoamp)
 res <- run_haplotype_analysis(
   reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
   reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
-  outdir    = "04_results/r/demo/E4-3",
+  outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 res$haplotypes

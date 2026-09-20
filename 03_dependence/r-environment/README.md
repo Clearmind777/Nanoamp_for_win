@@ -66,7 +66,7 @@ Rscript 03_dependence/r-environment/run_tests.R
 
 # functional regression over the real datasets in 01_data/
 Rscript 03_dependence/r-environment/run_functional_regression.R `
-  --outdir 04_results/r/test_run_win --modes A,B,C --threads 4
+  --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 ```
 
 ## The `ln_test_data` symlink layer on Windows

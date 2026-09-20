@@ -31,9 +31,12 @@ nanoamp 就是回答这三个问题的。
 
 > **为什么不能直接数？**
 > 纳米孔测序的每一条 read 都有约 0.5%–2% 的测序错误。如果直接拿原始 read 去和
-> 目标序列比对，会发现"完全一致"的只有 2%–4% —— 这不是实验失败，而是被测序错误
+> 目标序列比对，会发现"完全一致"的比例明显偏低 —— 这不是实验失败，而是被测序错误
 > 掩盖了。nanoamp 会先把测序错误校正掉、把真实变异保留下来，
 > 再按"校正后的序列"分类计数。所以它给出的比例才是可信的。
+>
+> 具体偏低多少要看样本：本仓库的验收数据（`01_data` 里的 E4-3）原始 read 里
+> 完全等于目的序列的只有 **31.5%**，校正后仍是多少，正是 nanoamp 要回答的问题。
 
 ---
 
@@ -268,15 +271,16 @@ release/             ← 发布产物：三个交付形态 + 一键安装器
   _offline/          离线依赖（R 安装器、R 包、minimap2）
 02_code/             源码
   r/                 nanoamp R 包源码
-  cli/               CLI 入口脚本
-  gui/               R Shiny 图形界面
+  cli/               CLI 入口脚本（make cli 用）
+  gui/               R Shiny 图形界面（make gui 用）
+  PythonGUI/         Python/Tkinter 图形界面源码（发行版 GUI 就是这个的产物）
   shared/            参数与输出契约
-06_GUI/              Python/Tkinter 图形界面源码
 01_data/             测试数据（test_data 原始 + ln_test_data 规范化链接层）
-03_dependence/       内置的 minimap2.exe 与编译方案
-00_materials/        委托文档、开发方案、历次工作报告
-04_results/          运行输出（Git 忽略）
-05_builds/           R 包构建产物（Git 忽略）
+03_dependence/       内置的 minimap2.exe、R 环境脚本与编译方案
+00_materials/        委托文档、开发方案、历次工作报告、完整教程
+  tutorial.md        傻瓜式教程：GUI 版 / CLI 版 / R 包版 + 依赖工具配置
+04_builds/           R 包构建产物（Git 忽略）
+tmp/test_results/    运行输出（Git 忽略）
 ```
 
 ### 开发环境搭建
@@ -288,13 +292,13 @@ Rscript 03_dependence/r-environment/setup_r_environment.R
 # 2. 安装 R 包
 R CMD INSTALL --library=D:/tools/R/lib 02_code/r
 
-# 3. Windows 上必须修一次测试数据链接层
+# 3. 补齐测试数据（链接层里 40 MB 的副本不提交到 Git，必须跑这一步）
 Rscript 03_dependence/r-environment/materialize_test_data.R
 
 # 4. 跑测试
 Rscript 03_dependence/r-environment/run_tests.R
 Rscript 03_dependence/r-environment/run_functional_regression.R `
-  --outdir 04_results/r/test_run_win --modes A,B,C --threads 4
+  --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 ```
 
 ### 常用 make 目标
@@ -306,7 +310,7 @@ make check            # R CMD check
 make cli              # 运行 nanoamp doctor
 make gui              # 启动 Shiny 界面
 make gui-python       # 启动 Python/Tkinter 界面
-make gui-exe          # 重新打包 06_GUI/dist/nanoamp.exe
+make gui-exe          # 重新打包 02_code/PythonGUI/dist/nanoamp.exe
 make gui-test         # Python 界面自测
 make install-exe      # 重新打包 release/install.exe
 make deps             # 说明内置 minimap2.exe 的来源
@@ -321,7 +325,7 @@ make offline-bundle   # 获取离线依赖包
 R CMD build 02_code/r --no-build-vignettes
 
 # 图形界面 exe（需要 pip install pyinstaller）
-python 06_GUI/build_exe.py
+python 02_code/PythonGUI/build_exe.py
 
 # 一键安装器 + 一键卸载器 exe（需要 pip install pyinstaller）
 python release/_installer/build_exe.py
@@ -329,6 +333,18 @@ python release/_installer/build_exe.py
 # 自测
 python release/_installer/test_installer_logic.py    # 安装器逻辑，不实际安装
 python release/_installer/test_release_layout.py     # 三个交付形态的布局自检
+python release/_installer/test_window_fit.py         # 两个窗口不会被内容挤出边界
+python release/_installer/test_locked_file_retry.py  # 文件被占用时的重试与报错
+```
+
+查看两个窗口的实际长相（需要 `pip install pywinauto pillow`，仅开发用）：
+
+```powershell
+# 安装器：默认路径、换到 D 盘、盘符不存在三种状态
+python release/_installer/inspect_installer_live.py tmp/test_results/shots
+
+# 卸载器：在沙箱里造一份假安装，截图后再删掉，不碰真实系统
+python release/_installer/capture_uninstaller_populated.py tmp/test_results/shots
 ```
 
 ### 外部工具与平台说明
@@ -344,13 +360,14 @@ python release/_installer/test_release_layout.py     # 三个交付形态的布�
 
 | 文档 | 内容 |
 |---|---|
+| `00_materials/tutorial.md` | **完整傻瓜式教程**：GUI 版、CLI 版、R 包版安装使用 + 外部依赖工具配置 |
 | `release/README.md` | 发布产物总览与安装器说明 |
 | `release/01_R-package/README.md` | R 包版安装与使用 |
 | `release/02_CLI/README.md` | CLI 版安装与使用 |
 | `release/03_GUI/README.md` | GUI 版安装与使用 |
 | `02_code/r/README.md` | R 包完整教程（英文） |
 | `02_code/r/README-CN.md` | R 包完整教程（中文） |
-| `06_GUI/README.md` | Python 界面实现与打包细节 |
+| `02_code/PythonGUI/README.md` | Python 界面实现与打包细节 |
 | `03_dependence/README.md` | 内置工具与平台支持矩阵 |
 | `03_dependence/offline-bundle/README.md` | 离线安装包的设计与理由 |
 | `00_materials/README.md` | 委托文档与历次工作报告 |
@@ -359,11 +376,14 @@ python release/_installer/test_release_layout.py     # 三个交付形态的布�
 
 1. **依赖 R**：图形界面 exe 只打包界面（10 MB），不含 R 运行时。
 2. **exe 冷启动约 1–3 秒**：单文件打包每次运行需解压到临时目录。
-3. **未在无 R 的干净机器上完整验证过安装器**的错误提示路径。
-4. **无批量界面**：CLI 的 `nanoamp batch` 尚未接进图形界面。
-5. **无 GTF / CDS 功能注释**：委托中点名的"移码/提前终止/missense"尚未实现。
-6. `01_data/ln_test_data/**` 在 Git 中以符号链接存储，Windows 克隆后必须跑一次
-   `materialize_test_data.R`。
+3. **无批量界面**：CLI 的 `nanoamp batch` 尚未接进图形界面。
+4. **无 GTF / CDS 功能注释**：委托中点名的"移码/提前终止/missense"尚未实现。
+5. `01_data/ln_test_data/` 里的 `.fastq` / `.xlsx` / `.ab1`（约 40 MB，是
+   `test_data/` 的逐字节副本）不提交到 Git。**克隆后必须跑一次
+   `materialize_test_data.R` 补齐**，脚本会按 md5 逐个校验，缺文件会报错退出。
+   详见 `01_data/ln_test_data/README.md`。
+6. **仓库体积**：`.git` 里含 `release/_offline` 的离线负载（R 安装器 87 MB 等），
+   完整克隆约 320 MB。发布包是直接解压使用的，使用者不需要克隆仓库。
 
 ---
 

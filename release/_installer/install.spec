@@ -1,7 +1,7 @@
 # PyInstaller spec for the nanoamp installer.
 #
 # Build:
-#   python release\_installer\build_installer_exe.py
+#   python release\_installer\build_exe.py
 #
 # Output: release\install.exe
 #

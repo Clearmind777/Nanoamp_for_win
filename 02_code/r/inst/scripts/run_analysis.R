@@ -20,7 +20,7 @@ CONFIG <- list(
   reads = file.path(project_root, "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq"),
   reference = file.path(project_root, "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa"),
   mode = "A",
-  outdir = file.path(project_root, "04_results/r/rstudio_demo/mode_A_self"),
+  outdir = file.path(project_root, "tmp/test_results/r/rstudio_demo/mode_A_self"),
   top_n = 20L,
   min_reads = 3L,
   min_freq = 0.02,

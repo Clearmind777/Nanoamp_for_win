@@ -31,7 +31,7 @@ Python 版本已经取消，后续开发统一以 R 技术栈为主。
 
 1. **一套算法，多种外壳**：CLI 和 GUI 都调用 `nanoamp` R 包，不重复实现分析逻辑；
 2. **共享契约**：参数名、默认值和输出列在 `shared/` 统一定义；
-3. **数据与代码分离**：测试数据在 `01_data/`，运行结果在 `04_results/<前端>/`；
+3. **数据与代码分离**：测试数据在 `01_data/`，运行结果在 `tmp/test_results/<前端>/`；
 4. **GUI 以 Windows 为主要目标**：使用 Shiny，可跨 Windows、Linux、macOS 运行，
    后续可用 RInno 打包为 Windows 安装包。
 5. **优先使用内置工具**：外部工具先从
@@ -51,7 +51,7 @@ nanoamp call \
   --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq \
   --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa \
   --mode A --top-n 20 \
-  --outdir 04_results/r/demo/E4-3
+  --outdir tmp/test_results/r/demo/E4-3
 ```
 
 R 控制台：
@@ -61,7 +61,7 @@ library(nanoamp)
 res <- run_haplotype_analysis(
   reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
   reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
-  outdir    = "04_results/r/demo/E4-3",
+  outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 res$haplotypes

@@ -14,17 +14,18 @@ Linux 变体在姊妹仓库 `a_09_18_26_mapping_programs_dev_for_linux`。
 ## 仓库结构
 
 ```text
-00_materials/     委托文档、开发方案和工作报告
+00_materials/     委托文档、开发方案、工作报告和完整教程（tutorial.md）
 01_data/          原始测试数据和规范化链接层
 02_code/          源代码
   r/              nanoamp R 包
-  cli/            独立 R CLI 入口和启动器
-  gui/            独立 R Shiny GUI 入口和启动器
+  cli/            独立 R CLI 入口和启动器（make cli 用）
+  gui/            独立 R Shiny GUI 入口和启动器（make gui 用）
+  PythonGUI/      Python/Tkinter 图形界面（发行版 GUI 就是它的产物）
   shared/         跨语言参数与输出契约
 03_dependence/    内置 minimap2.exe、编译方案、离网安装包、R 环境脚本
-04_results/       运行结果（除 README 外 Git 忽略）
-05_builds/        R 构建包和 R CMD check 产物（Git 忽略）
-tmp/              临时目录（Git 忽略）
+release/          发布产物：三个交付形态 + 一键安装/卸载器
+04_builds/        R 构建包和 R CMD check 产物（Git 忽略）
+tmp/test_results/ 运行结果（除 README 外 Git 忽略）
 ```
 
 ## 快速开始
@@ -45,7 +46,7 @@ sh 02_code/cli/nanoamp call `
   --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq `
   --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa `
   --mode A --top-n 20 `
-  --outdir 04_results/cli/demo
+  --outdir tmp/test_results/cli/demo
 
 # 4. 启动 GUI
 Rscript 02_code/gui/run_gui.R
@@ -58,7 +59,7 @@ library(nanoamp)
 res <- run_haplotype_analysis(
   reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
   reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
-  outdir    = "04_results/r/demo/E4-3",
+  outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 res$haplotypes
@@ -66,26 +67,34 @@ res$haplotypes
 
 ### Windows 上的 `ln_test_data` 链接层
 
-`01_data/ln_test_data/**` 在 Git 中以符号链接存储。Windows 只有在开启开发者模式
-（或具备 `SeCreateSymbolicLinkPrivilege`）时才能创建符号链接，因此普通 clone 出来的
-这些文件是约 100 字节的文本桩，内容是路径而不是序列数据。clone 后执行一次：
+`01_data/ln_test_data/` 里的 `.fastq` / `.xlsx` / `.ab1` 是 `test_data/` 的逐字节
+副本，合计约 40 MB，**不再提交到 Git**（`.fa` 保留，因为它们是重新解析写出的，
+复制不出来）。clone 后执行一次把它补齐：
 
 ```powershell
 Rscript 03_dependence/r-environment/materialize_test_data.R
 ```
 
-它会把仍是桩的项按内容复制为目标文件，保留真正的符号链接，并在最后对全部
-201 项做 MD5 校验。
+脚本按 `manifest.tsv` 逐项复制并做 MD5 校验，缺文件或内容不符会报错退出，
+结尾必须出现 `ALL ln_test_data LINKS RESOLVE TO THE CORRECT CONTENT`。
+
+它同时修复普通 clone（未开开发者模式）留下的状态：那时 git 把每个链接写成约
+100 字节、内容是路径的文本桩，脚本会把这些桩替换成真实副本。详见
+`01_data/ln_test_data/README.md`。
 
 ## 文档索引
 
 | 文档 | 内容 |
 |---|---|
+| `00_materials/tutorial.md` | **完整教程**：GUI 版、CLI 版、R 包版 + 外部依赖工具配置 |
 | `02_code/README.md` | 源码目录与组件状态 |
 | `02_code/r/README.md` | R 包教程（英文） |
 | `02_code/r/README-CN.md` | R 包教程（中文） |
 | `02_code/cli/README.md` | CLI 契约与启动器 |
-| `02_code/gui/README.md` | GUI 功能与 Windows 打包 |
+| `02_code/gui/README.md` | R Shiny GUI 功能 |
+| `02_code/PythonGUI/README.md` | Python/Tkinter 界面实现与打包细节 |
+| `01_data/ln_test_data/README.md` | 链接层为何不提交、怎么重建 |
+| `release/README.md` | 发布产物与一键安装器 |
 | `03_dependence/README-CN.md` | 内置工具与 Windows 平台支持矩阵 |
 | `03_dependence/windows-x86_64/README.md` | Windows 源码编译 minimap2 |
 | `03_dependence/r-environment/README.md` | R 环境搭建与测试运行 |
@@ -121,7 +130,7 @@ samtools 是可选依赖且未内置：默认用 `Rsamtools::asBam()` 完成 SAM
 ## 运行测试
 
 ```powershell
-# 每个 clone 先执行一次，修复测试数据链接层
+# 每个 clone 先执行一次，补齐链接层里未提交的大文件副本
 Rscript 03_dependence/r-environment/materialize_test_data.R
 
 # 单元测试（会用到内置的 minimap2）
@@ -129,7 +138,7 @@ Rscript 03_dependence/r-environment/run_tests.R
 
 # 基于 01_data/ 真实数据的功能回归
 Rscript 03_dependence/r-environment/run_functional_regression.R `
-  --outdir 04_results/r/test_run_win --modes A,B,C --threads 4
+  --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 ```
 
 从零搭建 Windows R 环境（R 安装、镜像、依赖安装）见

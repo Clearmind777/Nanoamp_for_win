@@ -62,6 +62,9 @@ MIN_R_MINOR = 2
 CREATE_NO_WINDOW = 0x08000000
 PACKAGE_NAME = "nanoamp"
 
+# Fixed width for the window; fit_to_content() only varies the height.
+WINDOW_WIDTH = 820
+
 
 # --------------------------------------------------------------------------
 # paths
@@ -249,7 +252,7 @@ class Context:
     @property
     def gui_exe(self) -> Path | None:
         for cand in (self.root / "03_GUI" / "nanoamp.exe",
-                     self.root / "06_GUI" / "dist" / "nanoamp.exe"):
+                     self.root / "02_code/PythonGUI" / "dist" / "nanoamp.exe"):
             if cand.is_file():
                 return cand
         return None
@@ -769,8 +772,10 @@ class InstallerWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
+        # A starting size only; fit_to_content() sets the real one once the
+        # widgets have reported how tall they need to be.
         self.root.geometry("760x640")
-        self.root.minsize(680, 580)
+        self.root.minsize(680, 560)
         self.events: queue.Queue = queue.Queue()
         self.var_install_root = tk.StringVar(value=str(common.default_install_home()))
         self.var_shortcut = tk.BooleanVar(value=True)
@@ -814,7 +819,9 @@ class InstallerWindow:
             justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        self.lbl_space = ttk.Label(loc, text="", font=("Microsoft YaHei UI", 8), foreground="#666666")
+        self.lbl_space = ttk.Label(loc, text="", font=("Microsoft YaHei UI", 8),
+                                   foreground="#666666",
+                                   wraplength=WINDOW_WIDTH - 80, justify="left")
         self.lbl_space.grid(row=2, column=0, sticky="w", pady=(2, 0))
         self.var_install_root.trace_add("write", lambda *_: self._update_space())
 
@@ -833,8 +840,17 @@ class InstallerWindow:
         self.progress = ttk.Progressbar(self.root, mode="determinate", maximum=6)
         self.progress.pack(fill="x", padx=pad)
 
+        # Buttons first, anchored to the bottom, so they can never be pushed
+        # off the window by tall content above them.
+        bar = ttk.Frame(self.root, padding=(pad, 0, pad, pad))
+        bar.pack(side="bottom", fill="x")
+        self.btn = ttk.Button(bar, text="开始安装", command=self._start)
+        self.btn.pack(side="left")
+        self.btn_close = ttk.Button(bar, text="关闭", command=self.root.destroy)
+        self.btn_close.pack(side="right")
+
         log_frame = ttk.LabelFrame(self.root, text="安装详情", padding=4)
-        log_frame.pack(fill="both", expand=True, padx=pad, pady=(8, 6))
+        log_frame.pack(side="bottom", fill="both", expand=True, padx=pad, pady=(8, 6))
         self.log_text = tk.Text(log_frame, wrap="word", height=12,
                                 font=("Consolas", 9), state="disabled")
         self.log_text.pack(side="left", fill="both", expand=True)
@@ -842,14 +858,11 @@ class InstallerWindow:
         sb.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=sb.set)
 
-        bar = ttk.Frame(self.root, padding=(pad, 0, pad, pad))
-        bar.pack(fill="x")
-        self.btn = ttk.Button(bar, text="开始安装", command=self._start)
-        self.btn.pack(side="left")
-        self.btn_close = ttk.Button(bar, text="关闭", command=self.root.destroy)
-        self.btn_close.pack(side="right")
-
         self.root.after(120, self._pump)
+        # Populate the free-space line immediately. The trace only fires on
+        # later edits, so without this the label stays empty until the user
+        # happens to touch the path field.
+        self._update_space()
 
     # -- logging --------------------------------------------------------
     def _log(self, text: str) -> None:
@@ -885,19 +898,56 @@ class InstallerWindow:
         self.var_install_root.set(str(common.default_install_home()))
         self._update_space()
 
+    def fit_to_content(self) -> None:
+        """Size the window to what it shows, and keep the buttons on screen.
+
+        A fixed geometry assumes the layout always needs the same height, which
+        is only true until a label grows or a wrapped line is added. This lets
+        the log pane absorb the slack, and shrinks it on a small screen so the
+        buttons never fall off the bottom.
+        """
+        text = self.log_text
+        wanted = text.cget("height")
+        try:
+            text.configure(height=3)
+            self.root.update_idletasks()
+            minimum = self.root.winfo_reqheight()
+
+            text.configure(height=wanted)
+            self.root.update_idletasks()
+            natural = self.root.winfo_reqheight()
+
+            screen_h = self.root.winfo_screenheight()
+            avail = (screen_h - 90) - (minimum - 3 * 22)
+            lines = max(3, min(wanted, avail // 22))
+            text.configure(height=lines)
+            self.root.update_idletasks()
+            height = max(minimum, min(self.root.winfo_reqheight(), screen_h - 90))
+
+            self.root.geometry(f"{WINDOW_WIDTH}x{height}+"
+                               f"{max((self.root.winfo_screenwidth() - WINDOW_WIDTH) // 2, 0)}+30")
+        finally:
+            text.configure(height=wanted)
+
     def _update_space(self) -> None:
         """Show where it will go and whether that drive has room."""
         target = Path(self.var_install_root.get().strip() or ".")
-        try:
-            anchor = target.anchor or "C:\\"
-            free = shutil.disk_usage(anchor).free
-            need = 1500 * 1024 * 1024
-            text = f"将安装到：{target}    该磁盘剩余 {free / 1e9:.1f} GB"
-            if free < need:
-                text += "  （不足，建议至少 1.5 GB）"
-            self.lbl_space.configure(text=text, foreground="#b00020" if free < need else "#666666")
-        except OSError:
-            self.lbl_space.configure(text=f"将安装到：{target}", foreground="#b00020")
+        need = 1500 * 1024 * 1024
+        free = _drive_free_for(target)
+        if free is None:
+            # The drive itself is unreachable (typo, removed USB stick, network
+            # share that is down). Say so instead of just turning red.
+            self.lbl_space.configure(
+                text=f"将安装到：{target}    无法读取该磁盘的剩余空间，请检查路径是否存在",
+                foreground="#b00020",
+            )
+            return
+        text = f"将安装到：{target}    该磁盘剩余 {free / 1e9:.1f} GB"
+        if free < need:
+            text += "  （不足，建议至少 1.5 GB）"
+        self.lbl_space.configure(
+            text=text, foreground="#b00020" if free < need else "#666666"
+        )
 
     # -- control --------------------------------------------------------
     def _start(self) -> None:
@@ -1023,8 +1073,24 @@ class InstallerWindow:
             )
 
     def run(self) -> int:
+        self.fit_to_content()
         self.root.mainloop()
         return 0
+
+
+def _drive_free_for(target: Path) -> int | None:
+    """Free bytes on the drive that would hold *target*, or None if unknown.
+
+    ``shutil.disk_usage`` needs a path that exists, but the user is normally
+    typing a path that does not exist yet. Fall back to the deepest parent that
+    does exist and query that drive, which is what a fresh install will use.
+    """
+    for candidate in (target, *target.parents):
+        try:
+            return shutil.disk_usage(candidate).free
+        except OSError:
+            continue
+    return None
 
 
 def _configure_console() -> None:

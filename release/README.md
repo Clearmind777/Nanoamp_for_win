@@ -142,19 +142,22 @@ R CMD build 02_code/r --no-build-vignettes
 copy nanoamp_0.1.0.tar.gz release\01_R-package\
 
 # 2. 图形界面 exe
-python 06_GUI\build_exe.py
-copy 06_GUI\dist\nanoamp.exe release\03_GUI\
+python 02_code/PythonGUI\build_exe.py
+copy 02_code/PythonGUI\dist\nanoamp.exe release\03_GUI\
 
 # 3. 离线依赖（R 安装器 + R 包 + minimap2）
 Rscript 03_dependence\offline-bundle\fetch_offline_bundle.R
-# 然后把 dist\ 里的内容按 layout 整理进 release\_offline\
+# 然后把产物按 release\_offline\ 的结构整理好
 
-# 4. 一键安装器 exe
-python release\_installer\build_installer_exe.py
+# 4. 一键安装器 + 一键卸载器 exe
+python release\_installer\build_exe.py
 ```
 
 安装器自身的逻辑测试（不需要真正安装）：
 
 ```powershell
 python release\_installer\test_installer_logic.py
+python release\_installer\test_release_layout.py
+python release\_installer\test_window_fit.py         # 窗口不会被内容挤出边界
+python release\_installer\test_locked_file_retry.py  # 文件被占用时重试并报错
 ```

@@ -3,11 +3,11 @@
 The GUI is implemented with R Shiny and shipped inside the `nanoamp` R package.
 The GUI calls the same R analysis functions as the CLI.
 
-> There is also a Python/Tkinter desktop window in `06_GUI/`, which ships as a
-> double-clickable `06_GUI/dist/nanoamp.exe`. It is a native window with no
+> There is also a Python/Tkinter desktop window in `02_code/PythonGUI/`, which ships as a
+> double-clickable `02_code/PythonGUI/dist/nanoamp.exe`. It is a native window with no
 > browser and no HTTP server, but fewer parameters. Both front ends call the
 > same R package, so they cannot disagree about results; pick whichever suits
-> the user. See `06_GUI/README.md`.
+> the user. See `02_code/PythonGUI/README.md`.
 
 ## Current implementation
 

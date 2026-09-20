@@ -40,7 +40,7 @@ From a built tarball (for example the one produced by `make check`; adjust the
 version if needed):
 
 ```r
-install.packages("05_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("04_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
 ```
 
 From the source directory:
@@ -318,7 +318,7 @@ path.
 3. Run the whole script.
 
 The script locates the repository root automatically and writes results under
-`04_results/r/`.
+`tmp/test_results/r/`.
 
 ## Using the test data
 
@@ -347,7 +347,7 @@ library(nanoamp)
 res <- run_haplotype_analysis(
   reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
   reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
-  outdir    = "04_results/r/demo/E4-3",
+  outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 ```
@@ -366,7 +366,7 @@ Full functional test across datasets:
 
 ```bash
 Rscript 02_code/r/inst/scripts/run_functional_tests.R \
-  --outdir 04_results/r/test_run_2 --modes A,B,C --threads 4
+  --outdir tmp/test_results/r/test_run_2 --modes A,B,C --threads 4
 ```
 
 The package has been verified with `R CMD check` and currently passes with

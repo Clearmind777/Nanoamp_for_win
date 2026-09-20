@@ -47,14 +47,6 @@ target_of <- function(link) {
   normalizePath(file.path(root, link), mustWork = FALSE)
 }
 
-is_symlink <- function(path) {
-  if (!file.exists(path)) return(FALSE)
-  if (.Platform$OS.type != "windows") return(nzchar(Sys.readlink(path)))
-  # On Windows a Git-materialized link is a tiny text file holding the target.
-  info <- file.info(path)
-  isTRUE(info$size < 4096) && !isTRUE(info$isdir)
-}
-
 copied <- 0L
 ok <- 0L
 skipped_symlink <- 0L

@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # ---------------------------------------------------------------------------
 # 基于 ln_test_data 的功能测试：三种模式 × self/wt 参考
-# 结果写入 04_results/r/test_run_1/
+# 结果写入 tmp/test_results/r/test_run_1/
 # ---------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
@@ -34,7 +34,7 @@ project_root <- find_project_root(start_dir)
 }
 
 opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
-  make_option(c("--outdir"), type = "character", default = "04_results/r/test_run_1"),
+  make_option(c("--outdir"), type = "character", default = "tmp/test_results/r/test_run_1"),
   make_option(c("--modes"), type = "character", default = "A,B,C"),
   make_option(c("--datasets"), type = "character", default = "TSM20260826,ZNF8,nano_seq"),
   make_option(c("--samples"), type = "character", default = NULL,

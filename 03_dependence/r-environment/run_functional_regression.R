@@ -7,7 +7,7 @@
 #
 # Usage:
 #   Rscript 03_dependence/r-environment/run_functional_regression.R \
-#     --outdir 04_results/r/test_run_win --modes A,B,C --threads 4
+#     --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 #
 # Environment variables:
 #   NANOAMP_R_LIB   library directory (default: D:/tools/R/lib)

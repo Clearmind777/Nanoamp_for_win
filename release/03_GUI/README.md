@@ -130,9 +130,9 @@
   冻结后只有约 10 MB（对比 PySide6 会到 100 MB 以上）。
 - **不重写任何算法**：界面通过子进程调用 R 的 `nanoamp_cli()`，
   与命令行完全一致，因此两者结果不可能不一致。
-- 打包：`python 06_GUI/build_exe.py`（PyInstaller，one-file、windowed）。
+- 打包：`python 02_code/PythonGUI/build_exe.py`（PyInstaller，one-file、windowed）。
 - 安装后由 `%LOCALAPPDATA%\nanoamp\config.ini` 的 `home=` 告知数据目录位置。
-- 源码与打包细节见 `06_GUI/README.md`。
+- 源码与打包细节见 `02_code/PythonGUI/README.md`。
 
 ## 另一个图形界面（R Shiny）
 

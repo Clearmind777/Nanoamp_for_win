@@ -24,7 +24,7 @@ R CMD build 02_code\r
 R CMD INSTALL nanoamp_0.1.0.tar.gz
 
 :: If the tarball was produced by `make check` on a Unix-like environment:
-:: R CMD INSTALL 05_builds\r\nanoamp_0.1.0.tar.gz
+:: R CMD INSTALL 04_builds\r\nanoamp_0.1.0.tar.gz
 ```
 
 2. Run the skeleton:
