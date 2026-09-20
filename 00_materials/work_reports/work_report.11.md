@@ -333,3 +333,71 @@ v0.1.0 的安装器无法使用，因此：
 「机器上没有 R → 安装器自己静默安装 R 运行时」这条分支**仍未实测**
 （本机已有 R 4.6.1，走的是「检测到已安装的 R」）。已写进 0.1.1 的
 Release 说明「已知限制」。
+
+---
+
+## 9. 另一台 Win10 机器上发现的两个缺陷（0.1.2 修复）
+
+用户在**没有系统 R** 的 Win10 机器上实测 0.1.1，报告两个问题。
+
+### 9.1 点「环境自检」报 `Could not find Rscript.exe`
+
+**原因：** 这台机器上没有 R，所以 `install.exe` 把自带的 R 装进了
+`<安装目录>\R\R-runtime\`，并把位置写进了 `config.ini` 的 `rscript=`。
+**但图形界面从来不读 `config.ini`。** 它的候选列表只有
+`C:\Program Files\R`、`D:\tools\R`、`%LOCALAPPDATA%\Programs\R`、`PATH`
+这些「常见位置」，自带的 R 一个都不在其中。
+
+于是出现了很讽刺的一幕：唯一知道 R 在哪儿的程序把答案写下来了，
+而需要这个答案的程序没有去看。
+
+**修复：** `r_runner._candidate_rscipts()` 现在按顺序查：
+
+1. `NANOAMP_RSCRIPT` 环境变量；
+2. **`config.ini` 里的 `rscript=`**（经 `NANOAMP_HOME`、
+   `%LOCALAPPDATA%\nanoamp.path` 指针文件、或默认安装目录找到）；
+3. 自带 R 运行时 `<安装目录>\R\R-runtime\bin\Rscript.exe`；
+4. 常见位置；
+5. `PATH`。
+
+顺带修掉反方向同样的问题：`install.exe` 自己的 `_r_candidates()` 也看不见
+它上一轮装好的自带 R，所以「再跑一次安装器来修复」会**又装一遍 R**。
+现在它先查指针文件和默认安装目录。
+
+### 9.2 桌面上多出一个「R 4.6.1」图标
+
+**原因：** R 的安装器是 Inno Setup，静默安装时默认会创建桌面和开始菜单
+快捷方式。用户只要 nanoamp 的图标，不该多出 R 的。
+
+**修复：** 调用 R 安装器时加上
+`/MERGETASKS="!desktopicon,!quicklaunchicon"`（以及
+`/SUPPRESSMSGBOXES /SP-`）。考虑到 R 以后的版本可能不认这个参数，
+另加一层兜底 `_hide_bundled_r_shortcuts()`：安装 R 前后各拍一次桌面与
+开始菜单的快照，**只删「安装期间新出现」且「名字像 R 的」**快捷方式 ——
+用户自己本来就有的 R 图标、以及任何无关图标都不会被碰。
+
+### 9.3 新增测试
+
+| 测试 | 覆盖 |
+|---|---|
+| `02_code/PythonGUI/tests/test_bundled_r_lookup.py` | 自带的 R 只存在于 `R-runtime`：默认安装位置、改过安装位置（靠 `nanoamp.path`）、`NANOAMP_HOME` 三种路径都能找到 |
+| `release/_installer/test_r_shortcut_cleanup.py` | 沙箱 `USERPROFILE`/`APPDATA`：用户原有的 R 图标保留、R 新图标从桌面和开始菜单都删掉、第二次运行是空操作 |
+
+第二个测试全程在沙箱里跑，**不读也不写真实桌面**（已单独确认真实桌面未被
+触碰）。
+
+### 9.4 验证
+
+- 两个 exe 都重建了：`nanoamp.exe`（改的是图形界面的查找逻辑）、
+  `install.exe`（改的是快捷方式抑制）；
+- 在沙箱 `LOCALAPPDATA`/`APPDATA`/`USERPROFILE` 下静默安装 → 退出码 0，
+  `config.ini` 写入了 `rscript=`；
+- 用**真实的** `r_runner.find_rscript()` 和 `app.find_repo_root()`
+  读那份 config → 两者都正确解析出安装目录和 Rscript；
+- 发布后从 GitHub 下载 `nanoamp-0.1.2-windows-setup.zip`，
+  sha256 与本地一致，包内 `install.exe` / `nanoamp.exe` 字节数正确。
+
+### 9.5 发布处理
+
+- 发布 **v0.1.2**；**删除 v0.1.1 的 Release**（tag 保留）；
+- 离线依赖包仍为 `nanoamp-0.1.0-windows-offline-deps.zip`（内容未变）。
