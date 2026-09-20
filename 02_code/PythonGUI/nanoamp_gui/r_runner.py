@@ -48,11 +48,64 @@ class RunResult:
         return self.returncode == 0
 
 
+def _configured_rscript() -> Path | None:
+    """The Rscript.exe recorded by install.exe in config.ini.
+
+    This is the authoritative answer when nanoamp was installed: the installer
+    may have bundled its own R under the install root, which none of the
+    well-known locations below would ever find. Reading it first is what makes
+    a nanoamp.exe that shipped its own R able to start at all.
+    """
+    roots: list[Path] = []
+
+    env_home = os.environ.get("NANOAMP_HOME")
+    if env_home:
+        roots.append(Path(env_home))
+
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        # The pointer file records a non-default install location.
+        marker = Path(local) / "nanoamp.path"
+        try:
+            if marker.is_file():
+                text = marker.read_text(encoding="utf-8").strip()
+                if text:
+                    roots.append(Path(text))
+        except OSError:
+            pass
+        roots.append(Path(local) / "nanoamp")
+
+    for root in roots:
+        ini = root / "config.ini"
+        if not ini.is_file():
+            continue
+        try:
+            for line in ini.read_text(encoding="utf-8", errors="replace").splitlines():
+                key, _, value = line.partition("=")
+                if key.strip() == "rscript":
+                    candidate = Path(value.strip().strip('"'))
+                    if candidate.is_file():
+                        return candidate
+        except OSError:
+            continue
+    return None
+
+
 def _candidate_rscipts() -> Iterable[Path]:
     """Yield plausible Rscript.exe locations, best guess first."""
     env = os.environ.get("NANOAMP_RSCRIPT")
     if env:
         yield Path(env)
+
+    configured = _configured_rscript()
+    if configured is not None:
+        yield configured
+
+    local = os.environ.get("LOCALAPPDATA")
+    # An R that install.exe unpacked into the nanoamp directory.
+    if local:
+        install_root = Path(local) / "nanoamp"
+        yield install_root / "R" / "R-runtime" / "bin" / "Rscript.exe"
 
     roots = [
         Path(r"D:\tools\R"),

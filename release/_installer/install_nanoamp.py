@@ -119,6 +119,14 @@ def _r_candidates() -> list[Path]:
     if env:
         out.append(Path(env))
 
+    # A previous run may have installed the bundled R into our install root.
+    # Without this, re-running the installer did not see it and started a
+    # second R installation.
+    for root in _pointer_install_roots():
+        out.append(root / "R" / "R-runtime" / "bin" / "Rscript.exe")
+        for child in sorted(root.glob("R/R-*"), reverse=True):
+            out.append(child / "bin" / "Rscript.exe")
+
     for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
         base = os.environ.get(var)
         if not base:
@@ -138,6 +146,24 @@ def _r_candidates() -> list[Path]:
     if which:
         out.append(Path(which))
     return out
+
+
+def _pointer_install_roots() -> list[Path]:
+    """Install roots we can discover without importing nanoamp_common."""
+    roots: list[Path] = []
+    try:
+        import nanoamp_common as common
+
+        pointer = common.registry_of_installs()
+        if pointer:
+            roots.append(pointer.parent)
+        roots.append(common.default_install_home())
+    except Exception:  # noqa: BLE001 - discovery is best-effort
+        pass
+    env = os.environ.get("LOCALAPPDATA")
+    if env:
+        roots.append(Path(env) / "nanoamp")
+    return [r for r in roots if r]
 
 
 def find_rscript() -> Path | None:
@@ -433,8 +459,17 @@ class Installer:
         rdir = target / "R-runtime"
         self.say(f"正在安装 R（约需 1-3 分钟，请勿关闭窗口）…")
         self.say(f"安装位置：{rdir}")
+
+        # R's installer is Inno Setup. Left to its defaults it also drops an
+        # "R 4.6.1" shortcut on the desktop and entries in the Start menu,
+        # which the user did not ask for -- they asked for a nanoamp shortcut.
+        # Excluding the icon tasks suppresses the desktop one; anything that
+        # still appears is removed by _hide_bundled_r_shortcuts() below.
+        before = _shortcut_snapshot()
         cmd = [
             str(installer), "/VERYSILENT", "/NORESTART", "/CURRENTUSER",
+            "/SUPPRESSMSGBOXES", "/SP-",
+            '/MERGETASKS="!desktopicon,!quicklaunchicon"',
             f"/DIR={rdir}",
         ]
         code, out = self.run(cmd, timeout=1800)
@@ -444,6 +479,8 @@ class Installer:
                 self.say(out.strip()[-2000:])
             self.events.put(("ask_r",))
             return False
+
+        _hide_bundled_r_shortcuts(before, self.say)
 
         rscript = rdir / "bin" / "Rscript.exe"
         if not rscript.is_file():
@@ -1089,6 +1126,43 @@ class InstallerWindow:
         self.fit_to_content()
         self.root.mainloop()
         return 0
+
+
+def _shortcut_snapshot() -> set[Path]:
+    """Every .lnk currently on the desktop or in the user's Start menu.
+
+    Used to find out what an installer dropped there, so we can take back the
+    ones the user never asked for without touching shortcuts that were already
+    present.
+    """
+    found: set[Path] = set()
+    for root in (desktop_dir(),
+                 Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs"):
+        try:
+            if root.is_dir():
+                found.update(root.rglob("*.lnk"))
+        except OSError:
+            continue
+    return found
+
+
+def _hide_bundled_r_shortcuts(before: set[Path], say) -> None:
+    """Remove R shortcuts that appeared while installing the bundled R.
+
+    Inno Setup's own task exclusion handles the common case; this is the
+    safety net for a future R build that ignores it. Only shortcuts that did
+    not exist beforehand AND look like they belong to R are touched, so a
+    user's own R installation is never disturbed.
+    """
+    after = _shortcut_snapshot()
+    for link in sorted(after - before):
+        name = link.name
+        if name.lower().startswith(("r ", "r-", "r4", "rgui")) or name.lower() in ("r.lnk", "r x64.lnk"):
+            try:
+                link.unlink()
+                say(f"已移除 R 安装器附带的快捷方式 {name}")
+            except OSError as exc:
+                say(f"移除 {name} 失败：{exc}")
 
 
 def _illegal_path_chars(target: Path) -> list[str]:
