@@ -83,15 +83,19 @@ nanoamp call ^
 | `--min-freq` | 0.02 | 变异最低频率 |
 | `--min-identity` | 0.90 | read 最低一致度 |
 | `--identity-cutoff` | 0.99 | 方案 B 聚类阈值 |
+| `--min-cluster-reads` | 2 | 方案 B 最小簇大小 |
 | `--consensus-method` | `decipher` | `decipher` 或 `medoid` |
 | `--aligner` | `minimap2` | 换成 `r` 使用 R 内比对（无需外部程序） |
 | `--threads` | 4 | 线程数 |
 | `--ref-label` | 参考文件名 | 输出里的参考名称 |
 | `--no-intermediates` | 关 | 不保留 BAM 等中间文件 |
 
+不确定参数值该填多少时，先用默认值跑一遍 E4-3 这个样本，再和
+`00_materials/tutorial.md` 里的预期输出对比。
+
 ### `nanoamp batch` — 批量
 
-样本表是一个 **TSV**（制表符分隔），至少三列：
+样本表是一个 **TSV**（制表符分隔），必须包含这三列（列名不能改）：
 
 ```text
 sample	reads	reference
@@ -99,13 +103,59 @@ sampleA	D:/data/sampleA.fastq	D:/data/targetA.fa
 sampleB	D:/data/sampleB.fastq	D:/data/targetB.fa
 ```
 
+- `sample` 会成为输出子目录名，**不要含 `/` `\` 或空格**；
+- `reads` / `reference` 写绝对路径最稳；相对路径是相对**你敲命令时所在的目录**，
+  不是相对样本表的位置。
+
+还可以**加一列可选的 `ref_label`**，给每个样本单独指定参考名称
+（对应 `call` 的 `--ref-label`）。不加这一列就用参考文件名。
+这个名字会出现在 `qc.tsv` 的 `reference_label` 行和 `run_manifest.json`
+的 `qc.reference_label` 里 —— **不会**改 `run_manifest.json` 顶层的
+`reference.name`，那一项始终是 FASTA 里的原始序列名。
+
 然后：
 
 ```bat
 nanoamp batch --sample-sheet samples.tsv --mode A --threads 8 --outdir "D:\results"
 ```
 
-每个样本一个子目录，并在 `outdir` 下汇总。
+`batch` 接受和 `call` **完全一样的分析参数**，只是把 `--reads` / `--reference`
+换成了样本表，并额外多了 `--sample-sheet`。参考名称不走命令行，
+而是上面说的 `ref_label` 列 —— 因为批量时每个样本可能不同。
+
+上面 `call` 的参数表整张都适用，例如：
+
+```bat
+nanoamp batch ^
+  --sample-sheet samples.tsv ^
+  --outdir "D:\results" ^
+  --mode A ^
+  --threads 8 ^
+  --min-reads 5 ^
+  --no-intermediates
+```
+
+输出结构：
+
+```text
+D:\results\
+|-- batch_summary.tsv        每个样本一行汇总（含 status、error 列）
+|-- sampleA\                 和单独跑 call 时完全一样的输出
+|   |-- haplotypes.tsv
+|   |-- qc.tsv
+|   `-- ...
+`-- sampleB\
+    `-- ...
+```
+
+任何一个样本失败**不会中断整批**：那一个的 `status` 记为 `error`、`error` 列
+写下报错原因，其余样本照常跑完。所以跑完第一件事是看
+`batch_summary.tsv` 的 `status` 列，而不是看屏幕最后一行。
+
+失败的样本如果什么都没产出，它那个空目录会被自动删掉（避免一排空目录
+看起来像"跑了一半"）；万一失败前已经写进去了一些文件，目录会保留下来，
+方便你查现场。成功和失败的样本加起来，目录数和 `batch_summary.tsv` 的
+`status=ok` 行数应当一致。
 
 > 用 Excel 存 TSV 时注意：选「文本（制表符分隔）」，不要选 CSV。
 > 路径里用正斜杠 `/` 最稳，反斜杠偶尔会被转义。

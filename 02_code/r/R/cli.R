@@ -126,6 +126,14 @@ cli_cmd_batch <- function(args) {
     }, error = function(e) {
       status <<- "error"
       err <<- conditionMessage(e)
+      # A failed sample can still leave an empty directory behind, because the
+      # analysis creates its outdir before it opens the input files. A tree of
+      # empty directories makes a batch look like it half-succeeded, so remove
+      # it -- but only if it is empty, so partial results are never destroyed.
+      if (dir.exists(outdir)) {
+        leftover <- list.files(outdir, all.files = TRUE, no.. = TRUE)
+        if (!length(leftover)) unlink(outdir, recursive = TRUE, force = TRUE)
+      }
       FALSE
     })
     summary_rows[[i]] <- data.table::data.table(
