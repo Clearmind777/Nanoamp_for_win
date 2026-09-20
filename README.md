@@ -26,6 +26,7 @@ Neither variant uses conda, and neither uses WSL.
 03_dependence/    bundled minimap2.exe, build recipe, offline bundle, R helpers
 04_results/       run outputs (Git ignores everything except README)
 05_builds/        R tarballs and R CMD check outputs (Git ignored)
+06_GUI/           Python/Tkinter desktop window; ships 06_GUI/dist/nanoamp.exe
 tmp/              scratch space (Git ignored)
 ```
 
@@ -33,6 +34,17 @@ tmp/              scratch space (Git ignored)
 
 The bundle ships `minimap2.exe` (statically linked, no MSYS2/Cygwin/conda/WSL
 needed at runtime), so a normal run needs nothing but R.
+
+### Easiest: double-click the desktop window
+
+```text
+06_GUI\dist\nanoamp.exe
+```
+
+A native Windows window: pick the FASTQ, pick the reference, press 开始分析, and
+read the haplotype table and QC in the same window. See `06_GUI/README.md`.
+
+### Command line
 
 ```powershell
 # 1. Install the R package (see 03_dependence/r-environment/README.md for R itself)
@@ -88,7 +100,8 @@ symlinks alone, and finishes with an MD5 check of all 201 entries.
 | `02_code/r/README.md` | R package tutorial (English) |
 | `02_code/r/README-CN.md` | R package tutorial (Chinese) |
 | `02_code/cli/README.md` | CLI contract and launchers |
-| `02_code/gui/README.md` | GUI features and Windows packaging |
+| `02_code/gui/README.md` | Shiny GUI (browser based) and Windows packaging |
+| `06_GUI/README.md` | Python/Tkinter desktop window and exe packaging |
 | `03_dependence/README.md` | bundled tools and Windows support matrix |
 | `03_dependence/windows-x86_64/README.md` | Windows source build of minimap2 |
 | `03_dependence/r-environment/README.md` | R environment setup and test runners |
@@ -165,7 +178,10 @@ make install          # install the R package
 make test             # run testthat tests
 make check            # build and R CMD check
 make cli              # run `nanoamp doctor`
-make gui              # launch the Shiny GUI
+make gui              # launch the Shiny GUI (browser based)
+make gui-python       # launch the Python/Tkinter desktop GUI
+make gui-exe          # rebuild 06_GUI/dist/nanoamp.exe
+make gui-test         # run the Python GUI self-tests
 make deps             # show how the bundled minimap2.exe was built
 make toolchain        # install the MSYS2/MINGW-w64 build toolchain
 make offline-bundle   # fetch the offline installer bundle into dist/

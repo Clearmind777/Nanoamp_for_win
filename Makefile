@@ -1,6 +1,6 @@
 R_PKG := 02_code/r
 
-.PHONY: help install test check cli gui deps toolchain offline-bundle offline-install clean-builds
+.PHONY: help install test check cli gui gui-python gui-exe gui-test deps toolchain offline-bundle offline-install clean-builds
 
 help:
 	@echo "nanoamp (Windows variant) project targets:"
@@ -8,7 +8,10 @@ help:
 	@echo "  make test             Run testthat tests"
 	@echo "  make check            Build and R CMD check into 05_builds/r"
 	@echo "  make cli              Run 'nanoamp doctor' from the repository CLI"
-	@echo "  make gui              Launch the Shiny GUI"
+	@echo "  make gui              Launch the Shiny GUI (browser based)"
+	@echo "  make gui-python       Launch the Python/Tkinter desktop GUI"
+	@echo "  make gui-exe          Rebuild 06_GUI/dist/nanoamp.exe"
+	@echo "  make gui-test         Run the Python GUI self-tests"
 	@echo "  make deps             Show how the bundled minimap2.exe was built"
 	@echo "  make toolchain        Install the MSYS2/MINGW-w64 build toolchain"
 	@echo "  make offline-bundle   Fetch the offline installer bundle into dist/"
@@ -32,6 +35,18 @@ cli:
 
 gui:
 	Rscript 02_code/gui/run_gui.R
+
+# Python/Tkinter desktop window. Ships as 06_GUI/dist/nanoamp.exe.
+gui-python:
+	python 06_GUI/run_gui.py
+
+gui-exe:
+	python 06_GUI/build_exe.py
+
+gui-test:
+	python 06_GUI/tests/test_headless.py
+	python 06_GUI/tests/test_e2e.py
+	python 06_GUI/tests/test_frozen.py
 
 # The Windows binary is already bundled; this only tells you how to rebuild it.
 deps:
