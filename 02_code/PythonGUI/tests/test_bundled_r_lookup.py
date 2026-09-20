@@ -49,8 +49,47 @@ def build_fake_install(root: Path) -> Path:
     return rscript
 
 
+def check_library_paths(failures: list[str]) -> None:
+    """The install's own R\\lib must be searched, and searched first.
+
+    This is the second half of the same blind spot: with a bundled R the
+    nanoamp package and its 109 dependencies live ONLY in
+    <install_root>\\R\\lib. That path used to be absent from the wrapper's
+    .libPaths(), so R could not find nanoamp and the GUI reported
+    "环境检测失败(退出码1)" and "R 包未安装".
+    """
+    root = Path(tempfile.mkdtemp(prefix="nanoamp-libs-"))
+    try:
+        expected = (root / "R" / "lib").as_posix()
+        (root / "R" / "lib").mkdir(parents=True, exist_ok=True)
+        saved = {k: os.environ.get(k) for k in ("NANOAMP_R_LIB", "LOCALAPPDATA", "NANOAMP_HOME")}
+        os.environ.pop("NANOAMP_R_LIB", None)
+        os.environ["NANOAMP_HOME"] = str(root)
+        try:
+            libs = rr._candidate_libs(root)
+            print(f"  candidate libs   -> {libs[:2]}{' ...' if len(libs) > 2 else ''}")
+            if expected not in libs:
+                failures.append(f"{expected} missing from candidate libs")
+            elif libs[0] != expected:
+                failures.append(f"install lib is not first (got {libs[0]})")
+            if len(libs) != len(set(p.lower() for p in libs)):
+                failures.append("duplicate entries in candidate libs")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main() -> int:
     failures: list[str] = []
+
+    # --- library path resolution (the "R 包未安装" half of the bug) --------
+    print("  library paths:")
+    check_library_paths(failures)
 
     # --- case 1: a default-location install, found via config.ini ----------
     tmp = Path(tempfile.mkdtemp(prefix="nanoamp-bundledr-"))

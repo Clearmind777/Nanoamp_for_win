@@ -56,6 +56,38 @@ def _configured_rscript() -> Path | None:
     well-known locations below would ever find. Reading it first is what makes
     a nanoamp.exe that shipped its own R able to start at all.
     """
+    return _configured_paths().get("rscript")
+
+
+def _configured_paths() -> dict[str, Path]:
+    """Paths recorded by install.exe in config.ini: rscript, rlib, home.
+
+    The installer is the only component that knows where it put things, so its
+    answers are preferred over every hard-coded guess. Both entries matter:
+    rscript is the interpreter, rlib is the library holding nanoamp and its
+    109 dependencies.
+    """
+    found: dict[str, Path] = {}
+    for root in _config_roots():
+        ini = root / "config.ini"
+        if not ini.is_file():
+            continue
+        try:
+            lines = ini.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key in ("rscript", "rlib", "home") and key not in found:
+                candidate = Path(value.strip().strip('"'))
+                if candidate.is_dir() or candidate.is_file():
+                    found[key] = candidate
+    return found
+
+
+def _config_roots() -> list[Path]:
+    """Directories that may hold config.ini, most authoritative first."""
     roots: list[Path] = []
 
     env_home = os.environ.get("NANOAMP_HOME")
@@ -74,21 +106,7 @@ def _configured_rscript() -> Path | None:
         except OSError:
             pass
         roots.append(Path(local) / "nanoamp")
-
-    for root in roots:
-        ini = root / "config.ini"
-        if not ini.is_file():
-            continue
-        try:
-            for line in ini.read_text(encoding="utf-8", errors="replace").splitlines():
-                key, _, value = line.partition("=")
-                if key.strip() == "rscript":
-                    candidate = Path(value.strip().strip('"'))
-                    if candidate.is_file():
-                        return candidate
-        except OSError:
-            continue
-    return None
+    return roots
 
 
 def _candidate_rscipts() -> Iterable[Path]:
@@ -143,8 +161,15 @@ def find_rscript() -> Path:
     )
 
 
-def _candidate_libs() -> list[str]:
+def _candidate_libs(repo_root: Path | None = None) -> list[str]:
     """Return candidate R library directories, most likely first.
+
+    The install's own ``R\\lib`` has to come first when nanoamp was installed:
+    that is where install.exe put the nanoamp package and all 109 dependencies,
+    and on a machine whose R was bundled by the installer it is the *only*
+    place they exist. Omitting it made 环境自检 fail with exit code 1 and
+    开始分析 report "R 包未安装" on exactly those machines, while working fine
+    on a developer box that happens to have nanoamp in its own library.
 
     Paths are returned with forward slashes: they are embedded in a generated R
     string literal, where a Windows backslash would be read as an escape
@@ -155,13 +180,33 @@ def _candidate_libs() -> list[str]:
     env = os.environ.get("NANOAMP_R_LIB")
     if env:
         libs.append(env)
+
+    # What install.exe recorded, and what a bundled layout implies.
+    configured = _configured_paths()
+    if "rlib" in configured:
+        libs.append(str(configured["rlib"]))
+    root = Path(repo_root) if repo_root else configured.get("home")
+    if root:
+        libs.append(str(root / "R" / "lib"))
+        # A bundled R keeps its own package library, which may hold deps.
+        libs.append(str(root / "R" / "R-runtime" / "library"))
+
     libs += [r"D:\tools\R\lib", r"C:\tools\R\lib"]
     # R_LIBS_USER is where plain install.packages() lands by default.
     local = os.environ.get("LOCALAPPDATA")
     if local:
         libs.append(os.path.join(local, "R", "win-library", "4.6"))
         libs.append(os.path.join(local, "R", "win-library", "4.5"))
-    return [p.replace("\\", "/") for p in libs]
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in libs:
+        norm = p.replace("\\", "/")
+        key = norm.lower()          # Windows paths are case-insensitive
+        if key not in seen:
+            seen.add(key)
+            out.append(norm)
+    return out
 
 
 WRAPPER_TEMPLATE = """\
@@ -198,7 +243,7 @@ class NanoampRunner:
         return tmp / "_gui_run_nanoamp.R"
 
     def write_wrapper(self) -> Path:
-        libs = ", ".join(f'"{p}"' for p in _candidate_libs())
+        libs = ", ".join(f'"{p}"' for p in _candidate_libs(self.repo_root))
         path = self.wrapper_path()
         path.write_text(WRAPPER_TEMPLATE.format(libs=libs), encoding="utf-8")
         return path
@@ -208,6 +253,12 @@ class NanoampRunner:
         # R and the analysis write UTF-8 log text.
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        # Put the install's own library where R looks by default, so the R code
+        # and anything R spawns agree with the wrapper's .libPaths() instead of
+        # depending on the user's .Renviron having been written correctly.
+        libs = _candidate_libs(self.repo_root)
+        if libs:
+            env["R_LIBS_USER"] = os.pathsep.join(libs)
         return env
 
     # -- invocation ---------------------------------------------------------
