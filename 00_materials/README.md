@@ -12,6 +12,7 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
 00_materials/
 |-- programs_dev_info.md       # original brief and requested deliverables
 |-- programs_dev_plan_1.md     # development plan (v1)
+|-- tutorial.md                # end-user tutorial: GUI, CLI, R package, dependencies
 `-- work_reports/
     |-- work_report.1.md       # R core algorithms A/B/C
     |-- work_report.2.md       # directory refactor and DECIPHER mode B
@@ -22,7 +23,8 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.7.md       # Windows/Linux repository split and offline verification
     |-- work_report.8.md       # Python/Tkinter desktop window and exe packaging
     |-- work_report.9.md       # three deliverables separated, install.exe, user README
-    `-- work_report.10.md      # install location choice, optional shortcut, uninstall.exe
+    |-- work_report.10.md      # install location choice, optional shortcut, uninstall.exe
+    `-- work_report.11.md      # repository slimming, layout rename, installer window fixes
 ```
 
 Start with `programs_dev_info.md` for the original request and
