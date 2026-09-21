@@ -268,6 +268,15 @@ c0837dd  docs: note the report-only follow-up commits in work_report.12
    再按工作区重建，问题消失。
 2. 两个资产 zip（合计约 280 MB）**没有**被暂存（`.gitignore` 生效，脚本里也有断言）。
 
-推送状态：见本文档所在的仓库 main 分支（截至本轮结束时，github.com:443 仍在不稳定状态，
-每次 push 都会在 `RPC failed; curl 56 Recv failure: Connection was reset`
-或 21 秒连接超时之间摆动；一旦有窗口即可推送）。
+推送状态：**已推送**。
+
+```text
+To https://github.com/Clearmind777/Nanoamp_for_win.git
+   c0837dd..465f225  main -> main
+```
+
+网络很挑路：直连 `github.com:443` 基本是 21 秒超时，而**走本机 Clash
+（`http.proxy=http://127.0.0.1:7890`）一次就成功**（第一次尝试也因为
+`RPC failed; curl 56 Recv failure: Connection was reset` 失败过一次）。
+另外把 `http.version` 固定为 HTTP/1.1、`http.postBuffer` 放大到 512 MB 之后再试，
+就顺利传完（本次要新传 3 个重建的 exe，约 34 MB 二进制）。
