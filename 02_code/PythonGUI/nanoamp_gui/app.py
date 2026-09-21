@@ -122,6 +122,9 @@ class NanoampApp(ttk.Frame):
 
         self.runner: NanoampRunner | None = None
         self.worker: threading.Thread | None = None
+        # True once the user asked to stop, so the "finished" handler can say
+        # "cancelled" instead of implying the analysis failed.
+        self._cancel_requested = False
         self.log_queue: queue.Queue[str | None] = queue.Queue()
         self.last_outdir: Path | None = None
         self.fasta_cache: dict[str, str] = {}
@@ -200,12 +203,16 @@ class NanoampApp(ttk.Frame):
         # -- actions
         actions = ttk.Frame(self)
         actions.grid(row=3, column=0, sticky="ew")
-        actions.columnconfigure(2, weight=1)
+        actions.columnconfigure(5, weight=1)
 
         self.btn_run = ttk.Button(actions, text="开始分析", command=self._on_run)
         self.btn_run.grid(row=0, column=0)
         self.btn_doctor = ttk.Button(actions, text="环境自检", command=self._on_doctor)
         self.btn_doctor.grid(row=0, column=1, padx=(6, 0))
+        # Enabled only while R is running; stops the analysis.
+        self.btn_cancel = ttk.Button(actions, text="取消操作", command=self._on_cancel,
+                                     state="disabled")
+        self.btn_cancel.grid(row=0, column=2, padx=(6, 0), sticky="w")
         self.btn_open = ttk.Button(
             actions, text="打开输出目录", command=self._on_open_outdir, state="disabled"
         )
@@ -363,6 +370,7 @@ class NanoampApp(ttk.Frame):
             "--top-n", str(self.var_topn.get()),
         ]
         self._clear_results()
+        self._cancel_requested = False
         self._set_running(True)
         self._append_log("")
         self._append_log("$ nanoamp " + " ".join(argv))
@@ -381,6 +389,7 @@ class NanoampApp(ttk.Frame):
             messagebox.showerror("缺少 R", str(exc))
             return
         self.runner = runner
+        self._cancel_requested = False
         self._set_running(True)
         self._append_log("")
         self._append_log("$ nanoamp doctor")
@@ -453,19 +462,59 @@ class NanoampApp(ttk.Frame):
         state = "disabled" if running else "normal"
         self.btn_run.configure(state=state)
         self.btn_doctor.configure(state=state)
+        # Cancel is the mirror image: available exactly while R is running.
+        self.btn_cancel.configure(state="normal" if running else "disabled")
         if running:
             self.progress.start(12)
             self.var_status.set("正在分析…（首次运行需加载 R 包，可能稍慢）")
         else:
             self.progress.stop()
 
+    def _on_cancel(self) -> None:
+        """Stop the running analysis or environment check.
+
+        Nothing is deleted: partial output stays in the output directory, so
+        the user can look at what was produced before stopping.
+        """
+        if self.worker is None or not self.worker.is_alive():
+            self.btn_cancel.configure(state="disabled")
+            return
+        self.btn_cancel.configure(state="disabled")
+        self.var_status.set("正在取消…")
+        self._append_log("")
+        self._append_log("用户请求取消，正在停止 R 进程…")
+        self._cancel_requested = True
+        # self.runner is set for both paths: _on_run stores the analysis
+        # runner and _on_doctor stores the one it created, so either kind of
+        # run can actually be stopped.
+        if self.runner is not None:
+            self.runner.cancel()
+
     def _finish_doctor(self, code: int) -> None:
         self._set_running(False)
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self.var_status.set("环境自检已取消。")
+            return
         self.var_status.set("环境自检完成。" if code == 0 else f"环境自检失败（退出码 {code}）。")
 
     def _finish_run(self, code: int, outdir: Path) -> None:
         self._set_running(False)
         self.last_outdir = outdir
+        if self._cancel_requested:
+            # A cancelled run is not a failure: say what happened and where the
+            # partial output is, instead of the generic error dialog.
+            self._cancel_requested = False
+            self.var_status.set(f"分析已取消。已产生的部分结果在：{outdir}")
+            if outdir.is_dir():
+                self.btn_open.configure(state="normal")
+            messagebox.showinfo(
+                "已取消",
+                "分析已取消。\n\n"
+                f"已产生的部分结果保留在：\n{outdir}\n\n"
+                "可以重新点击「开始分析」再跑一次。",
+            )
+            return
         if code != 0:
             self.var_status.set(f"分析失败（退出码 {code}）。请查看“运行日志”。")
             messagebox.showerror(

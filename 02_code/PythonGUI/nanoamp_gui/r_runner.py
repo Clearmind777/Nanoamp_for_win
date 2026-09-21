@@ -234,6 +234,8 @@ class NanoampRunner:
     def __init__(self, repo_root: Path):
         self.repo_root = Path(repo_root).resolve()
         self.rscript = find_rscript()
+        # The R process currently running, so the GUI can cancel it.
+        self._proc = None
 
     # -- environment --------------------------------------------------------
     def wrapper_path(self) -> Path:
@@ -290,6 +292,7 @@ class NanoampRunner:
             creationflags=_CREATE_NO_WINDOW,
             env=self._env(),
         )
+        self._proc = proc
         assert proc.stdout is not None
         try:
             for raw in iter(proc.stdout.readline, b""):
@@ -298,6 +301,21 @@ class NanoampRunner:
                 if stream is not None:
                     stream(line)
         finally:
+            self._proc = None
             proc.stdout.close()
             proc.wait()
         return proc.returncode, lines
+
+    def cancel(self) -> None:
+        """Stop the analysis that is currently running.
+
+        Kills the R process. Whatever partial output it had written stays on
+        disk, so the GUI tells the user which folder to look at rather than
+        pretending the run never happened.
+        """
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass

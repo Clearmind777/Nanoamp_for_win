@@ -5,8 +5,9 @@ _installer/build/
 __pycache__/
 *.py[cod]
 
-# Local logs
+# Local logs and machine-specific diagnosis reports
 *.log
+nanoamp_diagnose.txt
 
 # NOTE: install.exe, _offline/ (R installer, 109 R packages, minimap2),
 # 01_R-package/*.tar.gz and 03_GUI/nanoamp.exe ARE tracked on purpose.

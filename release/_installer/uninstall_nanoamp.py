@@ -222,6 +222,16 @@ class Uninstaller:
         self.plan = plan
         self.events = events
         self.freed = 0
+        # Set from the UI thread by cancel(); checked between steps.
+        self.cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the running uninstall to stop after the current step.
+
+        Deleting files cannot be interrupted halfway safely, so this stops at
+        the next step boundary instead of killing a recursive delete part-way.
+        """
+        self.cancelled.set()
 
     def say(self, text: str) -> None:
         self.events.put(("log", text))
@@ -236,13 +246,19 @@ class Uninstaller:
 
             self.step(0, total, "删除安装目录…")
             ok &= self._remove_dir()
+            if self._stopped():
+                return False
 
             self.step(1, total, "删除桌面快捷方式…")
             ok &= self._remove_shortcut()
+            if self._stopped():
+                return False
 
             self.step(2, total, "清理 PATH 与 .Renviron…")
             ok &= self._remove_path_entry()
             ok &= self._remove_renviron()
+            if self._stopped():
+                return False
 
             self.step(3, total, "清理记录文件…")
             self._remove_pointer()
@@ -252,8 +268,20 @@ class Uninstaller:
         except Exception as exc:  # noqa: BLE001
             import traceback
             self.say(traceback.format_exc())
+            if self.cancelled.is_set():
+                self.events.put(("cancelled",))
+                return False
             self.events.put(("fatal", str(exc)))
             return False
+
+    def _stopped(self) -> bool:
+        """True when the user cancelled; tells the GUI and stops the flow."""
+        if not self.cancelled.is_set():
+            return False
+        self.say("已按用户要求停止。已经删除的内容不会恢复；"
+                 "再次运行本程序可以继续清理剩下的部分。")
+        self.events.put(("cancelled",))
+        return True
 
     # -- steps ----------------------------------------------------------
     def _remove_dir(self) -> bool:
@@ -531,6 +559,7 @@ class UninstallWindow:
         self.var_renviron = tk.BooleanVar(value=self.plan.remove_renviron_line)
         self.var_runtime = tk.BooleanVar(value=False)
         self.worker: threading.Thread | None = None
+        self.uninstaller: Uninstaller | None = None
         self._build()
 
     def _build(self) -> None:
@@ -608,7 +637,11 @@ class UninstallWindow:
         bar.pack(side="bottom", fill="x")
         self.btn = ttk.Button(bar, text="开始卸载", command=self._start)
         self.btn.pack(side="left")
-        ttk.Button(bar, text="取消", command=self.root.destroy).pack(side="right")
+        # Cancel is disabled until an uninstall is actually running.
+        self.btn_cancel = ttk.Button(bar, text="取消操作", command=self._cancel,
+                                     state="disabled")
+        self.btn_cancel.pack(side="left", padx=(8, 0))
+        ttk.Button(bar, text="退出", command=self.root.destroy).pack(side="right")
 
         log_frame = ttk.LabelFrame(self.root, text="详情", padding=4)
         log_frame.pack(side="bottom", fill="both", expand=True, padx=pad, pady=(8, 6))
@@ -677,14 +710,43 @@ class UninstallWindow:
         self.plan.remove_runtime = bool(self.var_runtime.get())
 
         self.btn.configure(state="disabled")
+        self.btn_cancel.configure(state="normal")
         self.step_label.configure(text="正在卸载…")
         self.worker = threading.Thread(target=self._worker, daemon=True)
         self.worker.start()
 
+    def _cancel(self) -> None:
+        """Ask the running uninstall to stop at the next step boundary.
+
+        A recursive delete is not safe to kill part-way, so this only raises a
+        flag; the worker checks it between steps.
+        """
+        un = self.uninstaller
+        if un is None or not (self.worker and self.worker.is_alive()):
+            self.btn_cancel.configure(state="disabled")
+            return
+        self.btn_cancel.configure(state="disabled")
+        self.step_label.configure(text="正在取消…")
+        self._log("")
+        self._log("用户请求取消，将在当前步骤结束后停止…")
+        un.cancel()
+
+    def _finish_cancelled(self) -> None:
+        self.btn.configure(state="normal")
+        self.btn_cancel.configure(state="disabled")
+        self.step_label.configure(text="已取消。")
+        messagebox.showinfo(
+            APP_TITLE,
+            "已取消卸载。\n\n"
+            "已经删除的内容不会恢复。想继续清理的话，重新运行本程序即可 ——"
+            "它会重新检测还剩什么。",
+        )
+
     def _worker(self) -> None:
         un = Uninstaller(self.plan, self.events)
+        self.uninstaller = un
         un.run_all()
-        if self.plan.remove_runtime:
+        if not un.cancelled.is_set() and self.plan.remove_runtime:
             un.remove_runtime()
 
     def _pump(self) -> None:
@@ -701,8 +763,11 @@ class UninstallWindow:
                     self._log(f"\n=== {text} ===")
                 elif kind == "done":
                     self._finish(bool(ev[1]), ev[2])
+                elif kind == "cancelled":
+                    self._finish_cancelled()
                 elif kind == "fatal":
                     self.btn.configure(state="normal")
+                    self.btn_cancel.configure(state="disabled")
                     messagebox.showerror(APP_TITLE, f"卸载过程中出现错误。\n\n{ev[1]}")
         except queue.Empty:
             pass
@@ -710,6 +775,7 @@ class UninstallWindow:
 
     def _finish(self, ok: bool, freed: int) -> None:
         self.btn.configure(state="normal")
+        self.btn_cancel.configure(state="disabled")
         self.progress.configure(value=self.progress.cget("maximum"))
         if ok:
             self.step_label.configure(text="卸载完成。")

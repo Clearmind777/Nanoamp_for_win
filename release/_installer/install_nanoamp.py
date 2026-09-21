@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -297,6 +298,76 @@ class Installer:
         self.events = events
         self.rscript: Path | None = None
         self.lib = ctx.lib          # the library is inside the chosen root
+        # Cancellation: the GUI sets this from the UI thread while the worker
+        # runs, so it must stay a plain flag plus a lock over the child handles.
+        self.cancelled = threading.Event()
+        self._procs: list[subprocess.Popen] = []
+        self._proc_lock = threading.Lock()
+
+    # -- cancellation ---------------------------------------------------
+    def cancel(self) -> None:
+        """Ask the running install to stop and kill whatever it started."""
+        self.cancelled.set()
+        with self._proc_lock:
+            procs = list(self._procs)
+        for proc in procs:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+    def _spawn(self, cmd: list[str], **kw) -> subprocess.Popen:
+        """Start a child, remembering it so cancel() can kill it."""
+        proc = subprocess.Popen(cmd, **kw)
+        with self._proc_lock:
+            self._procs.append(proc)
+        return proc
+
+    def _forget(self, proc: subprocess.Popen) -> None:
+        with self._proc_lock:
+            if proc in self._procs:
+                self._procs.remove(proc)
+
+    def _stopped(self) -> bool:
+        if self.cancelled.is_set():
+            self.say("已取消。")
+            return True
+        return False
+
+    def cleanup_after_cancel(self) -> None:
+        """Undo what this run created, so a cancel leaves nothing behind.
+
+        Only touches things this installer just made: the install directory it
+        created, the R_LIBS_USER line it added, and its location pointer.
+        """
+        said = self.say
+        said("正在清理本次安装产生的文件…")
+        try:
+            if self.ctx.install_root.is_dir():
+                shutil.rmtree(self.ctx.install_root, onerror=lambda *a: None)
+                said(f"已删除 {self.ctx.install_root}")
+        except OSError as exc:
+            said(f"删除安装目录失败：{exc}")
+        try:
+            renv = renviron_path()
+            if renv.is_file():
+                kept = [ln for ln in renv.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if not ln.strip().startswith("R_LIBS_USER")]
+                if kept:
+                    renv.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                else:
+                    renv.unlink()
+                said(f"已还原 {renv}")
+        except OSError as exc:
+            said(f"还原 .Renviron 失败：{exc}")
+        try:
+            marker = common.default_install_home().parent / f"{PRODUCT}.path"
+            if marker.is_file():
+                marker.unlink()
+                said("已清除安装位置记录")
+        except OSError:
+            pass
 
     @property
     def r_exe(self) -> Path:
@@ -309,9 +380,11 @@ class Installer:
     def say(self, text: str) -> None:
         self.ctx.log.append(text)
         self.events.put(("log", text))
+        INSTALL_LOG.write(text)
 
     def step(self, index: int, total: int, text: str) -> None:
         self.events.put(("step", index, total, text))
+        INSTALL_LOG.write(f"--- step {index + 1}/{total}: {text}")
 
     # -- process helper -------------------------------------------------
     def run(self, cmd: list[str], env_extra: dict[str, str] | None = None,
@@ -326,18 +399,34 @@ class Installer:
         env["R_LIBS_USER"] = str(self.lib)
         if env_extra:
             env.update(env_extra)
+        proc = None
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, timeout=timeout,
-                creationflags=CREATE_NO_WINDOW, env=env,
+            proc = self._spawn(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW, env=env,
             )
-        except subprocess.TimeoutExpired:
-            return 124, "命令超时"
+            # Poll rather than wait(timeout) so a cancel is noticed promptly.
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    out, _ = proc.communicate(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    if self.cancelled.is_set():
+                        proc.kill()
+                        proc.communicate()
+                        return 130, "已取消"
+                    if time.monotonic() > deadline:
+                        proc.kill()
+                        proc.communicate()
+                        return 124, "命令超时"
+            text = (out or b"").decode("utf-8", errors="replace")
+            return proc.returncode, text
         except OSError as exc:
             return 127, str(exc)
-        out = (proc.stdout or b"") + (proc.stderr or b"")
-        text = out.decode("utf-8", errors="replace")
-        return proc.returncode, text
+        finally:
+            if proc is not None:
+                self._forget(proc)
 
     def run_to_file(self, cmd: list[str], env_extra: dict[str, str] | None = None,
                     timeout: int = 3600, tag: str = "cmd") -> tuple[int, str]:
@@ -356,23 +445,39 @@ class Installer:
 
         log_path = self.ctx.config / f"_{tag}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        proc = None
         try:
             with open(log_path, "wb") as fh:
-                proc = subprocess.run(
-                    cmd, stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
-                    timeout=timeout, creationflags=CREATE_NO_WINDOW, env=env,
+                proc = self._spawn(
+                    cmd, stdin=subprocess.DEVNULL, stdout=fh,
+                    stderr=subprocess.STDOUT,
+                    creationflags=CREATE_NO_WINDOW, env=env,
                 )
+                deadline = time.monotonic() + timeout
+                while proc.poll() is None:
+                    if self.cancelled.is_set():
+                        proc.kill()
+                        proc.wait()
+                        return 130, "已取消"
+                    if time.monotonic() > deadline:
+                        proc.kill()
+                        proc.wait()
+                        return 124, "命令超时"
+                    time.sleep(0.3)
             text = log_path.read_bytes().decode("utf-8", errors="replace")
             return proc.returncode, text
-        except subprocess.TimeoutExpired:
-            return 124, "命令超时"
         except OSError as exc:
             return 127, str(exc)
+        finally:
+            if proc is not None:
+                self._forget(proc)
 
     # -- main flow ------------------------------------------------------
     def run_all(self) -> bool:
         try:
             self._preflight()
+            if self._stopped():
+                return self._cancelled_flow()
 
             # Create the target directories before touching R: the library path
             # is passed to every R invocation, and R drops a non-existent entry
@@ -382,15 +487,21 @@ class Installer:
             total = 6
             self.step(0, total, "检查并安装 R 运行环境…")
             if not self._ensure_r():
-                return False
+                return self._stopped() and self._cancelled_flow()
+            if self._stopped():
+                return self._cancelled_flow()
 
             self.step(1, total, "安装 R 依赖包…")
             if not self._install_r_dependencies():
-                return False
+                return self._stopped() and self._cancelled_flow()
+            if self._stopped():
+                return self._cancelled_flow()
 
             self.step(2, total, f"安装 {PACKAGE_NAME} 主程序…")
             if not self._install_package():
-                return False
+                return self._stopped() and self._cancelled_flow()
+            if self._stopped():
+                return self._cancelled_flow()
 
             self.step(3, total, "配置 nanoamp 命令…")
             ok_cli = self._configure_cli()
@@ -407,8 +518,16 @@ class Installer:
         except Exception as exc:  # noqa: BLE001 - report anything to the user
             import traceback
             self.say(traceback.format_exc())
+            if self.cancelled.is_set():
+                return self._cancelled_flow()
             self.events.put(("fatal", str(exc)))
             return False
+
+    def _cancelled_flow(self) -> bool:
+        """Tell the GUI the user cancelled, after undoing partial changes."""
+        self.cleanup_after_cancel()
+        self.events.put(("cancelled",))
+        return False
 
     # -- steps ----------------------------------------------------------
     def _preflight(self) -> None:
@@ -819,6 +938,7 @@ class InstallerWindow:
         self.var_path = tk.BooleanVar(value=True)
         self.ctx = Context(root=app_dir())
         self.worker: threading.Thread | None = None
+        self.installer: Installer | None = None
         self._build()
 
     def _build(self) -> None:
@@ -883,6 +1003,10 @@ class InstallerWindow:
         bar.pack(side="bottom", fill="x")
         self.btn = ttk.Button(bar, text="开始安装", command=self._start)
         self.btn.pack(side="left")
+        # Cancel is disabled until something is actually running.
+        self.btn_cancel = ttk.Button(bar, text="取消操作", command=self._cancel,
+                                     state="disabled")
+        self.btn_cancel.pack(side="left", padx=(8, 0))
         self.btn_close = ttk.Button(bar, text="关闭", command=self.root.destroy)
         self.btn_close.pack(side="right")
 
@@ -907,6 +1031,33 @@ class InstallerWindow:
         self.log_text.insert("end", text + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+
+    def _alert(self, kind: str, title: str, message: str, **kw) -> object:
+        """Show a message box that cannot hide behind the main window.
+
+        A dialog that opens behind the window looks to the user like the button
+        did nothing, and because it is modal the whole install appears frozen.
+        Re-assert the window first, then the dialog, and keep the dialog on top.
+        """
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.update_idletasks()
+        except tk.TclError:
+            pass
+        show = getattr(messagebox, kind)
+        try:
+            # A transparent parent makes the dialog modal to our window.
+            return show(title, message, parent=self.root, **kw)
+        except tk.TclError:
+            return show(title, message, **kw)
+        finally:
+            try:
+                self.root.attributes("-topmost", False)
+                self.root.lift()
+                self.root.focus_force()
+            except tk.TclError:
+                pass
 
     # -- install location -----------------------------------------------
     def _pick_install_root(self) -> None:
@@ -988,26 +1139,31 @@ class InstallerWindow:
 
     # -- control --------------------------------------------------------
     def _start(self) -> None:
+        # Log the click before anything else. If a user reports that 开始安装
+        # does nothing, this line tells us whether the click arrived at all.
+        INSTALL_LOG.write(
+            f"=== 开始安装 clicked: path={self.var_install_root.get().strip()!r} ==="
+        )
         if self.worker and self.worker.is_alive():
+            INSTALL_LOG.write("ignored: a run is already in progress")
             return
 
         root_text = self.var_install_root.get().strip()
         if not root_text:
-            messagebox.showwarning(APP_TITLE, "请先选择安装位置。")
+            self._alert("showwarning", APP_TITLE, "请先选择安装位置。")
             return
         target = Path(root_text)
         illegal = _illegal_path_chars(target)
         if illegal:
-            messagebox.showerror(
-                APP_TITLE,
+            INSTALL_LOG.write(f"rejected: illegal characters {illegal}")
+            self._alert("showerror", APP_TITLE,
                 f"安装路径含有不能用于文件名的字符：{' '.join(illegal)}\n\n"
                 f"{target}\n\n"
                 "请改用只含字母、数字、空格和普通符号的路径。",
             )
             return
         if target.exists() and not target.is_dir():
-            messagebox.showerror(
-                APP_TITLE,
+            self._alert("showerror", APP_TITLE,
                 f"这个位置已经有一个同名文件：\n{target}\n\n"
                 "请换一个目录，或先改名/删除那个文件。",
             )
@@ -1016,8 +1172,7 @@ class InstallerWindow:
         # Warn before clobbering an existing install in a different place.
         existing = common.find_existing_install()
         if existing and Path(existing[0]).resolve() != target.resolve():
-            if not messagebox.askyesno(
-                APP_TITLE,
+            if not self._alert("askyesno", APP_TITLE,
                 f"检测到已有一份 nanoamp 安装在：\n{existing[0]}\n\n"
                 f"继续会在新位置再装一份（旧的那份需要另行卸载）。\n\n是否继续？",
             ):
@@ -1031,11 +1186,14 @@ class InstallerWindow:
             w.configure(state="disabled")
 
         self.btn.configure(state="disabled")
+        self.btn_cancel.configure(state="normal")
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
         self.step_label.configure(text="正在安装…")
         installer = Installer(self.ctx, self.events)
+        self.installer = installer
+        INSTALL_LOG.write(f"=== install started: root={self.ctx.install_root} ===")
         self.worker = threading.Thread(target=installer.run_all, daemon=True)
         self.worker.start()
 
@@ -1053,11 +1211,13 @@ class InstallerWindow:
                     self._log(f"\n=== {text} ===")
                 elif kind == "done":
                     self._finish(bool(ev[1]))
+                elif kind == "cancelled":
+                    self._finish_cancelled()
                 elif kind == "fatal":
                     self.btn.configure(state="normal")
+                    self.btn_cancel.configure(state="disabled")
                     self.step_label.configure(text="安装失败。")
-                    messagebox.showerror(
-                        APP_TITLE,
+                    self._alert("showerror", APP_TITLE,
                         "安装过程中出现错误。\n\n"
                         f"{ev[1]}\n\n"
                         "请把“安装详情”里的内容发给技术支持。",
@@ -1068,11 +1228,41 @@ class InstallerWindow:
             pass
         self.root.after(120, self._pump)
 
+    def _cancel(self) -> None:
+        """Ask the running install to stop.
+
+        The worker is inside a child process, so this only raises a flag and
+        kills that child; the worker notices and unwinds. The button is
+        disabled here so a second cancel cannot be queued, and the worker
+        re-enables the normal button when it finishes.
+        """
+        installer = self.installer
+        if installer is None or not (self.worker and self.worker.is_alive()):
+            self.btn_cancel.configure(state="disabled")
+            return
+        self.btn_cancel.configure(state="disabled")
+        self.step_label.configure(text="正在取消…")
+        self._log("")
+        self._log("用户请求取消，正在停止并清理…")
+        INSTALL_LOG.write("user requested cancel")
+        installer.cancel()
+
+    def _finish_cancelled(self) -> None:
+        self.btn.configure(state="normal")
+        self.btn_cancel.configure(state="disabled")
+        self.step_label.configure(text="已取消。")
+        self._log("")
+        self._log("安装已取消，本次产生的文件已清理。")
+        self._alert(
+            "showinfo", APP_TITLE,
+            "已取消安装。\n\n"
+            "本次安装产生的内容已经清理干净，电脑保持原样，可以随时重新安装。",
+        )
+
     def _ask_r(self) -> None:
         self.btn.configure(state="normal")
         self.step_label.configure(text="需要先安装 R。")
-        again = messagebox.askretrycancel(
-            APP_TITLE,
+        again = self._alert("askretrycancel", APP_TITLE,
             "没有在电脑上找到可用的 R（统计分析环境）。\n\n"
             "请先到 https://cran.r-project.org/bin/windows/base/ 下载并安装 R，\n"
             "安装时全部点“下一步”即可，然后回到本窗口点击“重试”。\n\n"
@@ -1108,8 +1298,7 @@ class InstallerWindow:
                 tail.append("命令行用法：新开一个命令行窗口，输入 nanoamp doctor")
             else:
                 tail.append(f"命令行用法：{self.ctx.bin}\\nanoamp.cmd doctor（未加入 PATH）")
-            messagebox.showinfo(
-                APP_TITLE,
+            self._alert("showinfo", APP_TITLE,
                 "安装完成！\n\n接下来可以这样使用：\n\n"
                 + "\n".join(steps)
                 + "\n"
@@ -1117,8 +1306,7 @@ class InstallerWindow:
             )
         else:
             self.step_label.configure(text="安装未全部成功，请查看安装详情。")
-            messagebox.showwarning(
-                APP_TITLE,
+            self._alert("showwarning", APP_TITLE,
                 "安装没有完全成功。\n\n请查看「安装详情」里的信息，或修好问题后重试一次。",
             )
 
@@ -1165,9 +1353,66 @@ def _hide_bundled_r_shortcuts(before: set[Path], say) -> None:
                 say(f"移除 {name} 失败：{exc}")
 
 
+def _log_dir() -> Path:
+    """Where to keep a durable install log.
+
+    Written next to the executable when that is writable (a USB stick or an
+    extracted folder), otherwise into %LOCALAPPDATA%. A GUI-only installer that
+    silently does nothing is impossible to diagnose from a support ticket, so
+    every run leaves this file behind.
+    """
+    candidates = [app_dir()]
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(Path(local))
+    candidates.append(Path(tempfile.gettempdir()))
+    for d in candidates:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            probe = d / ".nanoamp_write_test"
+            probe.write_text("x", encoding="ascii")
+            probe.unlink()
+            return d
+        except OSError:
+            continue
+    return Path(tempfile.gettempdir())
+
+
+class InstallLog:
+    """Append-only log shared by the installer and its GUI."""
+
+    def __init__(self) -> None:
+        self.path = _log_dir() / "nanoamp_install.log"
+        self._fh = None
+        try:
+            self._fh = open(self.path, "a", encoding="utf-8", errors="replace")
+        except OSError:
+            self._fh = None
+
+    def write(self, text: str) -> None:
+        if self._fh is None:
+            return
+        try:
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            self._fh.write(f"[{stamp}] {text}\n")
+            self._fh.flush()
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+
+
+INSTALL_LOG = InstallLog()
+
+
 def _illegal_path_chars(target: Path) -> list[str]:
     """Characters in *target* that Windows cannot store in a file name.
-
     The drive anchor must be excluded before checking. ``Path("C:/x").anchor``
     is ``"C:\\\\"`` -- a drive letter legitimately contains a colon -- so testing
     the whole string for ':' rejected *every* path, including the default one,
