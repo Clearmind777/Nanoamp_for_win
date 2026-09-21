@@ -323,45 +323,70 @@ R 安装器用的是仓库自己的那套开关（`/VERYSILENT /NORESTART /CURRE
 
 ---
 
-## 7. 远程推送（已准备就绪，被网络与凭据挡住）
+## 7. 远程推送（已成功）
 
-### 7.1 目标与准备
+### 7.1 结果
 
-* 远端：`https://github.com/Clearmind777/Nanoamp_for_win.git`（public，`main`）
-  —— 由该账号的仓库列表确定，本工作区就是它的副本（`.git` 已丢失）。
-* 提交已做好，放在 `tmp/push_clone` 里（**没有**动工作区）：
-
-  ```text
-  4d14184  fix: quote paths given to minimap2/samtools; correct QC metric docs
-  5318beb  feat: add 取消操作 to install.exe, uninstall.exe and nanoamp.exe   ← 远端当前 main
-  ```
-
-  父提交就是远端 main 尖端，因此这是一次 **fast-forward** 推送；改动恰好 10 个文件
-  （9 改 1 增），没有删除、没有动 `.fa`、没有动 `release/_offline`。
-
-* 为了不下载 400 MB 负载，克隆用的是 `--depth=1 --filter=blob:none --no-checkout`
-  （只取 102 个对象、26 KB），再把工作区内容补进工作树后提交。
-
-### 7.2 挡在前面的两件事
-
-| # | 阻塞 | 证据 |
-|---|---|---|
-| 1 | **网络到 github.com 时通时断** | 直连 5/5 失败（`Failed to connect to github.com port 443`、`Connection was reset`）；走本机 Clash（127.0.0.1:7890）3/3 为 `Connection was reset`；同一时段 `ls-remote` 偶尔成功（说明通道存在但不稳定） |
-| 2 | **没有可用凭据** | 全局 `credential.helper=manager`，但 Git 的 exec-path 里只有 `git-credential-wincred.exe`（无 GCM）；`cmdkey /list` 无 github 条目；无 `~/.git-credentials`、无 `GH_TOKEN`/`GITHUB_TOKEN`、无 `gh` CLI；SSH 22 端口连接超时（`~/.ssh` 里的密钥是内网主机的，未注册到 GitHub） |
-
-`tmp/push_retry.ps1` 会继续按"直连 / 代理"交替重试并写入 `tmp/push_retry.log`。
-一旦网络窗口出现且凭据就绪，推送命令就是：
-
-```powershell
-git -C tmp\push_clone push origin main:main
+```text
+To https://github.com/Clearmind777/Nanoamp_for_win.git
+   5318beb..bfbed45  main -> main
 ```
+
+远端：`https://github.com/Clearmind777/Nanoamp_for_win.git`（public，`main`）
+—— 由该账号的仓库列表确定，本工作区就是它的副本（`.git` 已丢失）。
+推上去的提交：
+
+```text
+bfbed45  fix: quote paths given to minimap2/samtools; correct QC metric docs
+5318beb  feat: add 取消操作 to install.exe, uninstall.exe and nanoamp.exe
+```
+
+父提交就是推送前远端 main 的尖端，因此这是一次 **fast-forward**，没有改写任何历史。
+改动 11 个文件（10 改 1 增），没有删除、没有动 `.fa` 链接层、没有动 `release/_offline`：
+`align.R`、`gui.R`、`test-core.R`、`test_locked_file_retry.py`、`README.md`、
+`00_materials/{README.md,tutorial.md,work_reports/work_report.12.md}`、
+`01_data/{README.md,ln_test_data/.gitignore,ln_test_data/README.md}`。
+
+### 7.2 过程：两个障碍与怎么过的
+
+| 障碍 | 具体表现 | 结果 |
+|---|---|---|
+| **网络到 github.com 时通时断** | 直连 5/5 失败（`Failed to connect ... port 443`、`Connection was reset`）；走本机 Clash（127.0.0.1:7890）3/3 为 `Connection was reset`；但同一时段 `ls-remote` 偶尔成功 | 靠重试等到网络窗口 |
+| **没有任何 GitHub 凭据** | `cmdkey /list` 无 github 条目、无 `~/.git-credentials`、无 `GH_TOKEN`、无 `gh` CLI、SSH 22 端口超时；`credential.helper=manager` 指向 `D:\app\Git` 里的 Git Credential Manager（一开始在 `C:\Program Files\Git` 下找，误判为"没有 GCM"） | 见下 |
+
+第一次 `git push`（后台重试循环那一次）确实建立过连接，然后在认证阶段卡住：
+`git-credential-manager get` 一直在等（约 7 分钟），最后以
+
+```text
+fatal: 远程主机强迫关闭了一个现有的连接。
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+收场 —— 也就是网络在 OAuth 往返中途被 reset，没拿到凭据。
+
+第二次改为**保留交互认证**（`GCM_INTERACTIVE=auto`，只禁用 git 自己的终端提问），
+在窗口前由使用者完成 GitHub 登录，约 1 分钟后：
+
+```text
+5318beb..bfbed45  main -> main
+```
+
+`git ls-remote origin main` 随即返回 `bfbed45`，与本提交一致。
+
+### 7.3 为了不下载 400 MB 负载
+
+克隆用的是 `--depth=1 --filter=blob:none --no-checkout`（只取 102 个对象、26 KB），
+再把工作区内容补进工作树后提交。副作用是 `git write-tree` / `git status` 会按需向
+promisor 远端要 blob，网络不畅时表现为长时间等待；把工作树补齐后这些操作就都变成纯本地了。
+另外，索引被刻意保持在"等于 HEAD + 仅暂存上面 11 个文件"的状态：`git add -A` 会把
+公司 `.seq` 的行尾重新规范化（上游存的是 CRLF 原文，`--no-filters` 哈希与 HEAD 一致），
+从而制造 42 个假改动；`.fa` 链接层同样不该作为内容提交。
 
 ---
 
 ## 8. 遗留与未验证
 
-1. **提交尚未推送到 GitHub**：原因见 §7.2（网络 + 凭据，都不是仓库内容问题）。
-   提交已在 `tmp/push_clone` 里就绪，`git push` 一次即可。
+1. **本次改动已推送到 `main`**（`bfbed45`），见 §7。
 2. **`install.spec` / `uninstall.spec` 写的是 `onefile=False`（onedir），但产物实际是 onefile**：
    两个 spec 都没有 `exclude_binaries=True` + `COLLECT`，PyInstaller 因此把二进制打进 exe
    （所以启动时会自解压到 `_MEI*`）。`test_release_layout.py` 只用
