@@ -40,11 +40,10 @@ R CMD INSTALL 02_code/r
 # 2. 环境检查
 sh 02_code/cli/nanoamp doctor
 
-# 3. 先修好测试数据链接层（见下方说明），再跑单样本
-Rscript 03_dependence/r-environment/materialize_test_data.R
+# 3. 跑单样本（测试数据就在 01_data/ 里，无需额外准备）
 sh 02_code/cli/nanoamp call `
-  --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq `
-  --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa `
+  --reads 01_data/TSM20260826/E4-3/reads.fastq `
+  --reference 01_data/TSM20260826/E4-3/reference.self.fa `
   --mode A --top-n 20 `
   --outdir tmp/test_results/cli/demo
 
@@ -57,30 +56,39 @@ R 控制台：
 ```r
 library(nanoamp)
 res <- run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )
 res$haplotypes
 ```
 
-### Windows 上的 `ln_test_data` 链接层
+### 测试数据：`01_data/<dataset>/<sample>/`
 
-`01_data/ln_test_data/` 里的 `.fastq` / `.xlsx` / `.ab1` 是 `test_data/` 的逐字节
-副本，合计约 40 MB，**不再提交到 Git**（`.fa` 保留，因为它们是重新解析写出的，
-复制不出来）。clone 后执行一次把它补齐：
+样本目录里直接就是分析要用的文件，**文件名固定**：
 
-```powershell
-Rscript 03_dependence/r-environment/materialize_test_data.R
+```text
+01_data/TSM20260826/E4-3/
+  reads.fastq            ← 测序数据
+  reference.self.fa      ← 目的序列
+  reference.wt.fa        ← 对照参考（可选）
+  consensus.N.fa         ← 公司共识序列
+  variants.N.xlsx        ← 公司变异统计表
+  sanger.N.ab1           ← Sanger 峰图
+  meta.tsv               ← 上面每个文件原本是公司的哪个交付文件
 ```
 
-脚本按 `manifest.tsv` 逐项复制并做 MD5 校验，缺文件或内容不符会报错退出，
-结尾必须出现 `ALL ln_test_data LINKS RESOLVE TO THE CORRECT CONTENT`。
+这些都是**普通文件、随仓库提交**，clone 之后不需要任何生成/修复步骤，
+直接用 `reads.fastq` + `reference.self.fa` 就能分析（GUI 选完 FASTQ 会自动
+在同一个目录里找 `reference.self.fa`）。
 
-它同时修复普通 clone（未开开发者模式）留下的状态：那时 git 把每个链接写成约
-100 字节、内容是路径的文本桩，脚本会把这些桩替换成真实副本。详见
-`01_data/ln_test_data/README.md`。
+要新增样本：建 `01_data/<dataset>/<sample>/`，把文件按上面的名字放进去，
+再写一份 `meta.tsv`（列：`dataset / sample / role / cluster / file /
+source_dir / source_file / source_note`）。功能回归会自动发现所有带
+`meta.tsv` 的样本目录。`01_data/README-raw.md` 保留了公司原始交付的
+文件命名与目录结构说明，`SD260728184122_1/`、`SD260812174403_1/` 两个批次
+仍是公司的原始结构。
 
 ## 文档索引
 
@@ -93,7 +101,7 @@ Rscript 03_dependence/r-environment/materialize_test_data.R
 | `02_code/cli/README.md` | CLI 契约与启动器 |
 | `02_code/gui/README.md` | R Shiny GUI 功能 |
 | `02_code/PythonGUI/README.md` | Python/Tkinter 界面实现与打包细节 |
-| `01_data/ln_test_data/README.md` | 链接层为何不提交、怎么重建 |
+| `01_data/README.md` | 链接层为何不提交、怎么重建 |
 | `release/README.md` | 发布产物与一键安装器 |
 | `03_dependence/README-CN.md` | 内置工具与 Windows 平台支持矩阵 |
 | `03_dependence/windows-x86_64/README.md` | Windows 源码编译 minimap2 |
@@ -130,13 +138,10 @@ samtools 是可选依赖且未内置：默认用 `Rsamtools::asBam()` 完成 SAM
 ## 运行测试
 
 ```powershell
-# 每个 clone 先执行一次，补齐链接层里未提交的大文件副本
-Rscript 03_dependence/r-environment/materialize_test_data.R
-
 # 单元测试（会用到内置的 minimap2）
 Rscript 03_dependence/r-environment/run_tests.R
 
-# 基于 01_data/ 真实数据的功能回归
+# 基于 01_data/ 真实数据的功能回归（测试数据随仓库提交，无需准备）
 Rscript 03_dependence/r-environment/run_functional_regression.R `
   --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 ```

@@ -1,0 +1,5 @@
+dataset	sample	role	cluster	file	source_dir	source_file	source_note
+nano_seq	293T-G5	reads		reads.fastq	nano_seq	293T-G5_TSM20260917-020-01097_20260918-020-BAN05-5_H04.fastq	
+nano_seq	293T-G5	consensus	1	consensus.1.fa	nano_seq	293T-G5_TSM20260917-020-01097_20260918-020-BAN05-5_H04.1.seq	
+nano_seq	293T-G5	reference.self		reference.self.fa	nano_seq	293T-G5_TSM20260917-020-01097_20260918-020-BAN05-5_H04.1.seq	公司主导共识序列（cluster 1）
+nano_seq	293T-G5	sanger	1	sanger.1.ab1	nano_seq	293T-G5_TSM20260917-020-01097_20260918-020-BAN05-5_H04.1_1.ab1	

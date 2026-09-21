@@ -281,7 +281,7 @@ release/             ← 发布产物：三个交付形态 + 一键安装器
   gui/               R Shiny 图形界面（make gui 用）
   PythonGUI/         Python/Tkinter 图形界面源码（发行版 GUI 就是这个的产物）
   shared/            参数与输出契约
-01_data/             测试数据（test_data 原始 + ln_test_data 规范化链接层）
+01_data/             测试数据（`<dataset>/<sample>/` 规范化命名，文件即数据）
 03_dependence/       内置的 minimap2.exe、R 环境脚本与编译方案
 00_materials/        委托文档、开发方案、历次工作报告、完整教程
   tutorial.md        傻瓜式教程：GUI 版 / CLI 版 / R 包版 + 依赖工具配置
@@ -298,10 +298,7 @@ Rscript 03_dependence/r-environment/setup_r_environment.R
 # 2. 安装 R 包
 R CMD INSTALL --library=D:/tools/R/lib 02_code/r
 
-# 3. 补齐测试数据（链接层里 40 MB 的副本不提交到 Git，必须跑这一步）
-Rscript 03_dependence/r-environment/materialize_test_data.R
-
-# 4. 跑测试
+# 3. 跑测试（测试数据就在 01_data/ 里，无需额外准备）
 Rscript 03_dependence/r-environment/run_tests.R
 Rscript 03_dependence/r-environment/run_functional_regression.R `
   --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
@@ -384,10 +381,11 @@ python release/_installer/capture_uninstaller_populated.py tmp/test_results/shot
 2. **exe 冷启动约 1–3 秒**：单文件打包每次运行需解压到临时目录。
 3. **无批量界面**：CLI 的 `nanoamp batch` 尚未接进图形界面。
 4. **无 GTF / CDS 功能注释**：委托中点名的"移码/提前终止/missense"尚未实现。
-5. `01_data/ln_test_data/` 里的 `.fastq` / `.xlsx` / `.ab1`（约 40 MB，是
-   `test_data/` 的逐字节副本）不提交到 Git。**克隆后必须跑一次
-   `materialize_test_data.R` 补齐**，脚本会按 md5 逐个校验，缺文件会报错退出。
-   详见 `01_data/ln_test_data/README.md`。
+5. **测试数据是普通文件**：`01_data/<dataset>/<sample>/` 里直接就是
+   `reads.fastq` / `reference.self.fa` / `consensus.N.fa` / `variants.N.xlsx` /
+   `sanger.N.ab1`，随仓库一起提交，**克隆后不需要任何准备步骤**。
+   每个样本目录里的 `meta.tsv` 记录这些文件原本是公司的哪个交付文件。
+   详见 `01_data/README.md`。
 6. **仓库体积**：`.git` 里含 `release/_offline` 的离线负载（R 安装器 87 MB 等），
    完整克隆约 320 MB。发布包是直接解压使用的，使用者不需要克隆仓库。
 

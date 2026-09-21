@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 # ---------------------------------------------------------------------------
-# 基于 ln_test_data 的功能测试：三种模式 × self/wt 参考
+# 基于 01_data/<dataset>/<sample>/ 的功能测试：三种模式 × self/wt 参考
+# 样本由各样本目录下的 meta.tsv 发现（数据层不再有 ln_test_data/manifest.tsv）
 # 结果写入 tmp/test_results/r/test_run_1/
 # ---------------------------------------------------------------------------
 
@@ -45,12 +46,28 @@ opt <- optparse::parse_args(optparse::OptionParser(option_list = list(
   make_option(c("--identity-cutoff"), type = "double", default = 0.99)
 )))
 
-ln_root <- file.path(project_root, "01_data", "ln_test_data")
-manifest_path <- file.path(ln_root, "manifest.tsv")
-if (!file.exists(manifest_path)) {
-  stop("请先运行 02_code/r/inst/scripts/prepare_test_data.R", call. = FALSE)
+# 样本发现：01_data/<dataset>/<sample>/ 每个目录里的 meta.tsv 记录该样本的
+# role（reads / reference.self / reference.wt / consensus / variants / sanger）
+# 与规范化文件名，以及它原本来自公司的哪个文件。这里把它读成一个和旧的
+# manifest.tsv 同形的表，下面的逻辑因此不用改。
+data_root <- file.path(project_root, "01_data")
+meta_files <- list.files(data_root, pattern = "^meta.tsv$", recursive = TRUE,
+                         full.names = TRUE)
+if (length(meta_files) == 0) {
+  stop("01_data 下没有找到任何样本（每个样本目录里应有 meta.tsv）", call. = FALSE)
 }
-manifest <- data.table::fread(manifest_path, sep = "\t", header = TRUE)
+manifest <- data.table::rbindlist(lapply(meta_files, function(path) {
+  sample_dir <- dirname(path)
+  rel_dir <- sub(paste0("^", project_root, "/?"), "", sample_dir)
+  m <- data.table::fread(path, sep = "\t", header = TRUE, colClasses = "character")
+  data.table::data.table(
+    dataset = m$dataset,
+    sample = m$sample,
+    role = m$role,
+    cluster = suppressWarnings(as.integer(m$cluster)),
+    link_path = gsub("\\\\", "/", file.path(rel_dir, m$file))
+  )
+}), fill = TRUE)
 
 modes <- strsplit(opt$modes, ",", fixed = TRUE)[[1]]
 datasets <- strsplit(opt$datasets, ",", fixed = TRUE)[[1]]

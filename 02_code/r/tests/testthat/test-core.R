@@ -132,11 +132,27 @@ test_that("比对不受路径中的空格影响", {
   expect_equal(res$qc$n_reads_used, 4)
 })
 
-test_that("ln_test_data manifest 指向存在的软链接", {
-  manifest_path <- file.path(project_root_test_root(), "01_data", "ln_test_data", "manifest.tsv")
-  skip_if_not(file.exists(manifest_path), "ln_test_data 尚未生成")
-  m <- data.table::fread(manifest_path, sep = "\t", header = TRUE)
-  expect_true(all(c("link_path", "target_path") %in% names(m)))
-  expect_false(any(is.na(m$link_path)))
-  expect_true(all(file.exists(file.path(project_root_test_root(), m$link_path))))
+test_that("01_data 的每个样本目录都自带规范化文件与 meta.tsv", {
+  data_root <- file.path(project_root_test_root(), "01_data")
+  # 在 R CMD check 里测试跑在 <pkg>.Rcheck/tests 下，仓库的 01_data 不在
+  # 相对位置上（同时也避免把 40 MB 数据打进 check 目录），此时跳过。
+  skip_if_not(dir.exists(data_root), "01_data not available (e.g. under R CMD check)")
+  meta_files <- list.files(data_root, pattern = "^meta.tsv$", recursive = TRUE,
+                           full.names = TRUE)
+  expect_gt(length(meta_files), 0)
+
+  check <- vapply(meta_files, function(path) {
+    sample_dir <- dirname(path)
+    m <- data.table::fread(path, sep = "\t", header = TRUE, colClasses = "character")
+    if (!all(c("dataset", "sample", "role", "file", "source_file") %in% names(m))) {
+      return(FALSE)
+    }
+    # 规范化的文件必须真的在样本目录里，且每个样本都能直接拿去分析
+    all(file.exists(file.path(sample_dir, m$file))) &&
+      file.exists(file.path(sample_dir, "reads.fastq")) &&
+      file.exists(file.path(sample_dir, "reference.self.fa"))
+  }, logical(1))
+  expect_true(all(check))
+  # 32 个样本来自 3 个数据集（SD 批次不属于链接层，没有 meta.tsv）
+  expect_equal(length(unique(basename(dirname(dirname(meta_files))))), 3)
 })

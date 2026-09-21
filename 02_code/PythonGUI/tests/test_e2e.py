@@ -14,7 +14,7 @@ from nanoamp_gui.r_runner import NanoampRunner  # noqa: E402
 root = find_repo_root(resource_base())
 runner = NanoampRunner(root)
 
-sample = root / "01_data" / "ln_test_data" / "TSM20260826" / "E4-3"
+sample = root / "01_data" / "TSM20260826" / "E4-3"
 reads = sample / "reads.fastq"
 reference = sample / "reference.self.fa"
 assert reads.is_file(), f"missing {reads}"

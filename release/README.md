@@ -1,19 +1,85 @@
 # nanoamp 发布包
 
-这个目录是**要交付给使用者的东西**。整个 `release` 文件夹一起打包发出去即可。
+这个目录里**两个 zip 就是可以直接上传到 GitHub Release 的资产**，其余是它们的源材料。
 
-## 里面有什么
+## 要发布的两个资产
 
 ```text
 release/
-|-- install.exe          ← 一键安装器：双击它就装好了（约 10 MB）
-|-- uninstall.exe        ← 一键卸载器：双击它就能干净删掉
-|-- 01_R-package/        R 包版：给要写 R 代码的同学
-|-- 02_CLI/              命令行版：给要批量处理样本的同学
-|-- 03_GUI/              图形界面版：给不写代码的人（最常用）
-|-- _installer/          安装器源码（开发者用，使用者可忽略）
-`-- _offline/            离线依赖：R 安装器 + 109 个 R 包 + minimap2
+|-- nanoamp-0.1.3-windows-setup.zip          ← 上传这个（约 33 MB）
+|-- nanoamp-0.1.0-windows-offline-deps.zip   ← 和上面一起上传（约 248 MB）
+|-- SHA256SUMS.txt      ← 两个 zip 的 sha256，随仓库提交，便于对账
+|-- build_assets.py     ← 重新生成上面两个 zip（内容逐条自校验）
+|
+|-- install.exe          ← setup zip 的源材料（约 11 MB）
+|-- uninstall.exe        ← setup zip 的源材料
+|-- 01_R-package/         R 包版：给要写 R 代码的同学
+|-- 02_CLI/               命令行版：给要批量处理样本的同学
+|-- 03_GUI/               图形界面版：给不写代码的人（最常用）
+|-- _installer/           安装器源码（开发者用，使用者可忽略）
+|-- diagnose_install_env.* 装不上时用来采环境信息
+`-- _offline/             offline-deps zip 的源材料：R 安装器 + 109 个 R 包 + minimap2
 ```
+
+两个 zip 的内部结构**共用一个根目录** `nanoamp-windows/`：
+
+```text
+nanoamp-windows/            ← 两个 zip 都解压到同一个地方
+|-- install.exe  uninstall.exe
+|-- 01_R-package/  02_CLI/  03_GUI/  _installer/  diagnose_install_env.*
+`-- _offline/               ← 来自 nanoamp-0.1.0-windows-offline-deps.zip
+```
+
+> 两个 zip 合计约 280 MB。**248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 的硬限制，
+> 因此 zip 不进 Git**（`.gitignore` 已排除）；仓库里只提交 `SHA256SUMS.txt`，
+> 任何时候都能用它确认"这个资产是不是这个版本构建出来的"。
+
+## 重新生成资产
+
+```powershell
+# 1. R 包 tarball（含当前源码，例如 align.R 的路径修复）
+R CMD build 02_code/r --no-build-vignettes
+copy nanoamp_0.1.0.tar.gz release\01_R-package\
+
+# 2. 图形界面 exe
+python 02_code\PythonGUI\build_exe.py
+copy 02_code\PythonGUI\dist\nanoamp.exe release\03_GUI\
+
+# 3. 一键安装器 + 一键卸载器 exe
+python release\_installer\build_exe.py
+
+# 4. 打包成两个资产 zip，并重写 SHA256SUMS.txt
+python release\build_assets.py
+
+# 5. 只校验（不重建）：解压后每条内容与源材料逐字节比对
+python release\build_assets.py --verify-only
+```
+
+`build_assets.py` 用固定时间戳写 zip，所以同样的源材料给出同样的字节；
+它会把产物解压回来、逐条与源文件比 sha256，不一致就直接报错退出。
+
+### 与本仓库已发布资产对账
+
+```powershell
+python release\build_assets.py --compare-published <下载的 setup.zip> <下载的 offline-deps.zip>
+```
+
+会列出条目差异与 CRC 不一致的文件（离线依赖包 113 个文件里 112 个与 v0.1.2 的
+资产完全一致，唯一差异是 `PACKAGES` 索引的行尾：发布版是 CRLF，仓库里是 LF，
+内容逐行相同）。
+
+## 上传
+
+```powershell
+gh release create v0.1.3 `
+  release\nanoamp-0.1.3-windows-setup.zip `
+  release\nanoamp-0.1.0-windows-offline-deps.zip `
+  --title "nanoamp 0.1.3 — Windows 版" --notes-file <说明.md>
+```
+
+或在 GitHub 网页上对某个 tag 上传这两个文件。名字不要改：使用者按
+`nanoamp-<版本>-windows-setup.zip` 找安装包，`nanoamp-0.1.0-windows-offline-deps.zip`
+的版本号保持 0.1.0（离线依赖本身没有变化）。
 
 ## 使用者怎么用
 
@@ -115,14 +181,15 @@ uninstall.exe --silent --keep-runtime         :: 保留随程序安装的 R
 > 注意：控制台模式需要能看到 stdout 的环境（普通 cmd / PowerShell 窗口），
 > 直接双击不带参数时才弹图形窗口。
 
-## 重要：不要把 `install.exe` 单独拷走
+## 重要：两个 zip 要解压到同一个文件夹
 
-`install.exe` 和 `uninstall.exe` 各只有约 10 MB，**离线依赖（约 250 MB）放在
-它们旁边的 `_offline/` 里**。如果把 `install.exe` 单独复制到别处运行，
-它会报「安装包不完整」。
+`install.exe` 和 `uninstall.exe` 各约 11 MB，**离线依赖（约 250 MB）在
+`nanoamp-0.1.0-windows-offline-deps.zip` 里**。使用者要把
+`nanoamp-0.1.3-windows-setup.zip` 与 `nanoamp-0.1.0-windows-offline-deps.zip`
+**解压到同一个目录**（两者都以 `nanoamp-windows/` 为根），再双击里面的
+`install.exe`。只解压 setup 包就运行，`install.exe` 会报「安装包不完整」。
 
 这样做是刻意的：如果把 250 MB 依赖打进 exe，每次启动都要自解压，既慢又占空间。
-整个 `release` 文件夹一起分发即可。
 
 `uninstall.exe` 不依赖 `_offline/`，单独拷走也能用。
 
@@ -134,7 +201,7 @@ uninstall.exe --silent --keep-runtime         :: 保留随程序安装的 R
 - 首次安装约需 1.5 GB 磁盘空间（R 约 0.5 GB + 109 个 R 包约 0.35 GB + 余量）
 - **不需要 conda，不需要 WSL**
 
-## 重新构建这个发布包（开发者）
+## 离线依赖从哪来（开发者）
 
 ```powershell
 # 1. R 包 tarball
@@ -145,9 +212,11 @@ copy nanoamp_0.1.0.tar.gz release\01_R-package\
 python 02_code/PythonGUI\build_exe.py
 copy 02_code/PythonGUI\dist\nanoamp.exe release\03_GUI\
 
-# 3. 离线依赖（R 安装器 + R 包 + minimap2）
-Rscript 03_dependence\offline-bundle\fetch_offline_bundle.R
-# 然后把产物按 release\_offline\ 的结构整理好
+# 3. 离线依赖：R 安装器 + 109 个 R 包二进制 + minimap2.exe
+#    由 03_dependence/offline-bundle/fetch_offline_bundle.R 获取（需要联网），
+#    再按 release\_offline\ 的结构放好；minimap2.exe 也可用
+#    03_dependence/windows-x86_64/build_minimap2.sh 重新编译。
+#    打包成资产本身不需要联网。
 
 # 4. 一键安装器 + 一键卸载器 exe
 python release\_installer\build_exe.py

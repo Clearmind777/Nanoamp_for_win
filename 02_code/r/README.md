@@ -322,13 +322,8 @@ The script locates the repository root automatically and writes results under
 
 ## Using the test data
 
-The repository ships a normalized symlink layer:
-
-```bash
-Rscript 02_code/r/inst/scripts/prepare_test_data.R
-```
-
-This creates `01_data/ln_test_data/<dataset>/<sample>/` with:
+The repository ships the samples directly under `01_data/<dataset>/<sample>/`
+(ordinary files, committed to Git — nothing to prepare after cloning):
 
 ```text
 reads.fastq
@@ -345,8 +340,8 @@ Example:
 ```r
 library(nanoamp)
 res <- run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )

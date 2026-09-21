@@ -1,0 +1,5 @@
+dataset	sample	role	cluster	file	source_dir	source_file	source_note
+ZNF8	WT	reads		reads.fastq	ZNF8/2026.8.29-wt	WT_TSM20260828-020-01380_20260829-020-BAN05-4_B11.fastq	
+ZNF8	WT	consensus	1	consensus.1.fa	ZNF8/2026.8.29-wt	WT_TSM20260828-020-01380_20260829-020-BAN05-4_B11.1.seq	
+ZNF8	WT	reference.self		reference.self.fa	ZNF8/2026.8.29-wt	WT_TSM20260828-020-01380_20260829-020-BAN05-4_B11.1.seq	WT 自身共识
+ZNF8	WT	sanger	1	sanger.1.ab1	ZNF8/2026.8.29-wt	WT_TSM20260828-020-01380_20260829-020-BAN05-4_B11.1_1.ab1	

@@ -28,8 +28,7 @@ nanoamp **Windows 版本**随项目分发的外部工具目录。
     |-- README.md
     |-- setup_r_environment.R
     |-- run_tests.R
-    |-- run_functional_regression.R
-    `-- materialize_test_data.R
+    `-- run_functional_regression.R
 ```
 
 ## nanoamp 如何查找外部工具

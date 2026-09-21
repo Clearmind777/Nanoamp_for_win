@@ -36,10 +36,17 @@ tmp/test_results/*
 *.tmp
 *.log
 
-# ---- 大型中间文件（test_data 暂作为固定测试集保留在 Git 中）----
+# ---- 大型中间文件（01_data 里的样本是固定测试集，作为普通文件提交）----
 *.bam.bai.tmp
 *.fastq.gz.tmp
 
 # ---- R 构建产物 ----
 *.Rcheck/
 nanoamp_*.tar.gz
+
+# ---- Release 资产压缩包 ----
+# 由 release/build_assets.py 生成，可发布到 GitHub Release；
+# 248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 限制，因此不进 Git，
+# 只提交 release/SHA256SUMS.txt 以便对账。
+release/nanoamp-*-windows-setup.zip
+release/nanoamp-*-windows-offline-deps.zip

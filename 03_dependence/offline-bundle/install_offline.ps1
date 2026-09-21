@@ -153,7 +153,6 @@ Say "Installing the nanoamp package"
 if ($LASTEXITCODE -ne 0) { throw "nanoamp installation failed" }
 
 Say "Running the test suite"
-& $rscript --vanilla (Join-Path $repoRoot '03_dependence\r-environment\materialize_test_data.R')
 & $rscript --vanilla (Join-Path $repoRoot '03_dependence\r-environment\run_tests.R')
 
 Write-Host ""

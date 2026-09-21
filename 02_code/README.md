@@ -55,8 +55,8 @@ sh 02_code/cli/nanoamp doctor
 
 # Run one sample
 nanoamp call \
-  --reads 01_data/ln_test_data/TSM20260826/E4-3/reads.fastq \
-  --reference 01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa \
+  --reads 01_data/TSM20260826/E4-3/reads.fastq \
+  --reference 01_data/TSM20260826/E4-3/reference.self.fa \
   --mode A --top-n 20 \
   --outdir tmp/test_results/r/demo/E4-3
 ```
@@ -66,8 +66,8 @@ R console:
 ```r
 library(nanoamp)
 res <- run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )

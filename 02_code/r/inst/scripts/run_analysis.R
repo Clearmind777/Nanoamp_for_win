@@ -17,8 +17,8 @@ find_project_root <- function(start = getwd()) {
 project_root <- find_project_root()
 
 CONFIG <- list(
-  reads = file.path(project_root, "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq"),
-  reference = file.path(project_root, "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa"),
+  reads = file.path(project_root, "01_data/TSM20260826/E4-3/reads.fastq"),
+  reference = file.path(project_root, "01_data/TSM20260826/E4-3/reference.self.fa"),
   mode = "A",
   outdir = file.path(project_root, "tmp/test_results/r/rstudio_demo/mode_A_self"),
   top_n = 20L,
@@ -40,7 +40,8 @@ suppressPackageStartupMessages(library(nanoamp))
 if (!file.exists(CONFIG$reads)) {
   stop(paste0(
     "找不到输入文件: ", CONFIG$reads,
-    "\n请先运行 02_code/r/inst/scripts/prepare_test_data.R"
+    "\n01_data/<dataset>/<sample>/ 里应当直接有 reads.fastq 与 reference.self.fa",
+    "（原文件名见该样本目录的 meta.tsv）"
   ), call. = FALSE)
 }
 

@@ -14,7 +14,7 @@ from tkinter import ttk  # noqa: E402
 from nanoamp_gui.app import APP_TITLE, NanoampApp, find_repo_root, resource_base  # noqa: E402
 
 root_dir = find_repo_root(resource_base())
-sample = root_dir / "01_data" / "ln_test_data" / "TSM20260826" / "E4-3"
+sample = root_dir / "01_data" / "TSM20260826" / "E4-3"
 outdir = root_dir / "tmp/test_results" / "gui" / "E4-3"
 
 root = tk.Tk()

@@ -120,8 +120,8 @@ release\install.exe --check
 全教程都用仓库里这一份真实测试数据，方便你对照：
 
 ```text
-01_data\ln_test_data\TSM20260826\E4-3\reads.fastq            ← 测序数据
-01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa      ← 目的序列
+01_data\TSM20260826\E4-3\reads.fastq            ← 测序数据
+01_data\TSM20260826\E4-3\reference.self.fa      ← 目的序列
 ```
 
 **这份数据的正确结果是**（下文的每一步都以此为准）：
@@ -211,19 +211,19 @@ reference_length   529
 2. 文件类型选 `FASTQ`，找到并双击：
 
    ```text
-   01_data\ln_test_data\TSM20260826\E4-3\reads.fastq
+   01_data\TSM20260826\E4-3\reads.fastq
    ```
 
 3. 选好后，如果你的 `reads.fastq` 同目录下正好有 `reference.self.fa`，
    程序会**自动**把参考序列填上。本样本就会自动填上
-   `01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa`。
+   `01_data\TSM20260826\E4-3\reference.self.fa`。
 
 **第 2 步：确认目的序列**
 
 如果第 1 步没有自动填，就自己点 **目的序列 (FASTA)** 的「浏览…」，选中：
 
 ```text
-01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa
+01_data\TSM20260826\E4-3\reference.self.fa
 ```
 
 > 本题的关键：**参考序列必须是"这个样本的预期序列"**，不能拿别的样本的。
@@ -492,7 +492,7 @@ dependence directory: NOT FOUND
 用本仓库的 E4-3 测试数据，**复制下面整段到 PowerShell 直接回车**：
 
 ```powershell
-nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa" --mode A --top-n 20 --outdir "tmp\test_results\demo\E4-3"
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --top-n 20 --outdir "tmp\test_results\demo\E4-3"
 ```
 
 > 上面是一整行。在 PowerShell 里想换行写，行尾用反引号 `` ` ``；
@@ -535,13 +535,13 @@ rank  haplotype_id  count  proportion  is_reference  variants
 **只改一个参数的例子**（想看前 100 条单倍型，并用 8 线程）：
 
 ```powershell
-nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa" --mode A --top-n 100 --threads 8 --outdir "tmp\test_results\demo\E4-3_top100"
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --top-n 100 --threads 8 --outdir "tmp\test_results\demo\E4-3_top100"
 ```
 
 **不带 BAM 中间文件的例子**：
 
 ```powershell
-nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa" --mode A --no-intermediates --outdir "tmp\test_results\demo\E4-3_lean"
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --no-intermediates --outdir "tmp\test_results\demo\E4-3_lean"
 ```
 
 ## 2.5 `nanoamp batch` —— 批量分析
@@ -564,9 +564,9 @@ sample	reads	reference
 
 ```text
 sample	reads	reference
-E4-3	01_data/ln_test_data/TSM20260826/E4-3/reads.fastq	01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa
-E4-9	01_data/ln_test_data/TSM20260826/E4-9/reads.fastq	01_data/ln_test_data/TSM20260826/E4-9/reference.self.fa
-E4-19	01_data/ln_test_data/TSM20260826/E4-19/reads.fastq	01_data/ln_test_data/TSM20260826/E4-19/reference.self.fa
+E4-3	01_data/TSM20260826/E4-3/reads.fastq	01_data/TSM20260826/E4-3/reference.self.fa
+E4-9	01_data/TSM20260826/E4-9/reads.fastq	01_data/TSM20260826/E4-9/reference.self.fa
+E4-19	01_data/TSM20260826/E4-19/reads.fastq	01_data/TSM20260826/E4-19/reference.self.fa
 ```
 
 > **用 Excel 存 TSV 的正确姿势：**
@@ -755,7 +755,7 @@ Import-Csv "tmp\test_results\demo\E4-3\haplotypes.tsv" -Delimiter "`t" | Select-
 在 PowerShell 里判断：
 
 ```powershell
-nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa" --outdir "tmp\test_results\demo\E4-3"
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --outdir "tmp\test_results\demo\E4-3"
 if ($LASTEXITCODE -ne 0) { Write-Host "分析失败！" } else { Write-Host "分析成功" }
 ```
 
@@ -1023,8 +1023,8 @@ nanoamp doctor
 
 ```r
 run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3_r",
   mode      = "A",
   aligner   = "r"
@@ -1034,7 +1034,7 @@ run_haplotype_analysis(
 命令行等价写法：
 
 ```powershell
-nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\ln_test_data\TSM20260826\E4-3\reference.self.fa" --mode A --aligner r --outdir "tmp\test_results\demo\E4-3_r"
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --aligner r --outdir "tmp\test_results\demo\E4-3_r"
 ```
 
 **什么时候用它：**
@@ -1073,8 +1073,8 @@ nanoamp call --reads "01_data\ln_test_data\TSM20260826\E4-3\reads.fastq" --refer
 library(nanoamp)
 
 res <- run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A",     # 参考引导（默认，推荐）
   top_n     = 20
@@ -1128,16 +1128,16 @@ nanoamp_defaults()
 
 # 从 R 里直接调命令行接口（等价于命令行的 nanoamp call）
 nanoamp_cli(c("call",
-              "--reads",     "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-              "--reference", "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+              "--reads",     "01_data/TSM20260826/E4-3/reads.fastq",
+              "--reference", "01_data/TSM20260826/E4-3/reference.self.fa",
               "--mode",      "A",
               "--top-n",     "20",
               "--outdir",    "tmp/test_results/r/demo/E4-3"))
 
 # 只保留 TSV，不写 BAM 等中间文件
 res <- run_haplotype_analysis(
-  reads = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir = "tmp/test_results/r/demo/E4-3_lean",
   keep_intermediates = FALSE
 )

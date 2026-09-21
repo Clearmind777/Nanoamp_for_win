@@ -299,13 +299,8 @@ R 内后端使用 Biostrings 成对比对，不需要外部工具；速度较慢
 
 ## 使用测试数据
 
-生成规范化软链接：
-
-```bash
-Rscript 02_code/r/inst/scripts/prepare_test_data.R
-```
-
-会生成 `01_data/ln_test_data/<dataset>/<sample>/`，包含：
+样本直接就在 `01_data/<dataset>/<sample>/` 里（普通文件，随仓库提交，
+clone 后不需要任何准备），每个样本目录包含：
 
 ```text
 reads.fastq
@@ -322,8 +317,8 @@ meta.tsv
 ```r
 library(nanoamp)
 res <- run_haplotype_analysis(
-  reads     = "01_data/ln_test_data/TSM20260826/E4-3/reads.fastq",
-  reference = "01_data/ln_test_data/TSM20260826/E4-3/reference.self.fa",
+  reads     = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
   outdir    = "tmp/test_results/r/demo/E4-3",
   mode      = "A"
 )

@@ -58,9 +58,6 @@ This installs `BiocManager`, `data.table`, `jsonlite`, `optparse`, `readxl`,
 ```powershell
 R CMD INSTALL --library=D:/tools/R/lib 02_code/r
 
-# repair the test-data link layer (see below)
-Rscript 03_dependence/r-environment/materialize_test_data.R
-
 # testthat suite
 Rscript 03_dependence/r-environment/run_tests.R
 
@@ -69,32 +66,19 @@ Rscript 03_dependence/r-environment/run_functional_regression.R `
   --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
 ```
 
-## The `ln_test_data` symlink layer on Windows
+## Test data
 
-`01_data/ln_test_data/**` is stored in Git as **symlinks** (mode `120000`).
-Windows can only create symlinks with Developer Mode (or
-`SeCreateSymbolicLinkPrivilege`) enabled, so in a normal Windows checkout:
+`01_data/<dataset>/<sample>/` holds the analysis files under fixed names
+(`reads.fastq`, `reference.self.fa`, `reference.wt.fa`, `consensus.N.fa`,
+`variants.N.xlsx`, `sanger.N.ab1`) plus a `meta.tsv` that records which company
+deliverable each file came from. They are ordinary files committed to Git, so a
+clone is usable immediately — there is no link layer to repair and no
+post-clone step. `run_functional_tests.R` discovers samples by walking
+`01_data/*/*/meta.tsv`.
 
-* `git checkout` writes each link target as a **~100 byte text stub** instead
-  of a symlink, and
-* `file.symlink()` used by `prepare_test_data.R` returns `FALSE` without
-  creating anything.
-
-Every `ln_test_data` file then contains a path string rather than sequence
-data, and any analysis reading them fails. This is visible as failures in
-`test-gui.R` (Mode C analysis) plus a stub-content README string.
-
-`materialize_test_data.R` repairs this state: for each row of `manifest.tsv`
-it compares the link path against the real target and **copies** the content
-where needed. Genuine symlinks are detected via `Sys.readlink()` and left
-alone, so the script is a no-op on Linux. It finishes with a full MD5
-verification of all 201 entries.
-
-Alternative if you do have symlink privileges:
-
-```powershell
-git config --global core.symlinks true   # requires Developer Mode, then re-clone
-```
+The company's original deliverables (including the two `SD…` batches, which
+have no FASTQ) and their naming rules are documented in
+`01_data/README-raw.md`.
 
 ## Notes on this network
 

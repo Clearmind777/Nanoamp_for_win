@@ -28,8 +28,7 @@ repository `a_09_18_26_mapping_programs_dev_for_linux`.
     |-- README.md
     |-- setup_r_environment.R
     |-- run_tests.R
-    |-- run_functional_regression.R
-    `-- materialize_test_data.R
+    `-- run_functional_regression.R
 ```
 
 ## How nanoamp finds external tools
