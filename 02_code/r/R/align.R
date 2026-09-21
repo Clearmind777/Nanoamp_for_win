@@ -10,11 +10,18 @@ align_reads <- function(reads_path, reference_path, out_bam,
 
   sam <- sub("\\.bam$", ".sam", out_bam)
   log_file <- paste0(out_bam, ".minimap2.log")
+  # Path arguments MUST be shQuote()d: system2() assembles the command line as
+  # paste(c(shQuote(command), env, args), collapse = " "), so `command` is quoted
+  # for us but `args` are pasted verbatim. An unquoted path containing a space
+  # (e.g. C:/Users/John Smith/...) is then split into extra argv entries and
+  # minimap2 exits 1 with "failed to open file 'C:\Users\John'". Note also that
+  # the stdout/stderr targets below are opened by R itself and must NOT be
+  # quoted -- quoting those breaks the redirection.
   status <- system2(
     minimap2_bin,
     c("-ax", "map-ont", "--cs", "-t", as.integer(threads),
-      normalizePath(reference_path, mustWork = TRUE),
-      normalizePath(reads_path, mustWork = TRUE)),
+      shQuote(normalizePath(reference_path, mustWork = TRUE)),
+      shQuote(normalizePath(reads_path, mustWork = TRUE))),
     stdout = sam, stderr = log_file
   )
   if (status != 0 || !file.exists(sam)) {
@@ -25,13 +32,13 @@ align_reads <- function(reads_path, reference_path, out_bam,
     samtools_bin <- nanoamp_tool_path("samtools", required = TRUE)
     status <- system2(
       samtools_bin,
-      c("sort", "-@", as.integer(threads), "-o", out_bam, sam),
+      c("sort", "-@", as.integer(threads), "-o", shQuote(out_bam), shQuote(sam)),
       stdout = FALSE, stderr = log_file
     )
     if (status != 0 || !file.exists(out_bam)) {
       stop(sprintf("samtools sort failed with exit code %s", status), call. = FALSE)
     }
-    system2(samtools_bin, c("index", out_bam), stdout = FALSE, stderr = FALSE)
+    system2(samtools_bin, c("index", shQuote(out_bam)), stdout = FALSE, stderr = FALSE)
   } else {
     destination <- sub("\\.bam$", "", out_bam)
     bam <- Rsamtools::asBam(sam, destination, overwrite = TRUE, indexDestination = TRUE)

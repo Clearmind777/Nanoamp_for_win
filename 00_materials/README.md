@@ -24,7 +24,8 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.8.md       # Python/Tkinter desktop window and exe packaging
     |-- work_report.9.md       # three deliverables separated, install.exe, user README
     |-- work_report.10.md      # install location choice, optional shortcut, uninstall.exe
-    `-- work_report.11.md      # repository slimming, layout rename, installer window fixes
+    |-- work_report.11.md      # repository slimming, layout rename, installer window fixes
+    `-- work_report.12.md      # local data-layer repair, paths with spaces, doc corrections
 ```
 
 Start with `programs_dev_info.md` for the original request and

@@ -58,8 +58,10 @@ Rscript 03_dependence/r-environment/materialize_test_data.R
 ALL ln_test_data LINKS RESOLVE TO THE CORRECT CONTENT
 ```
 
-`.fa` 文件保留在 Git 里：它们不是逐字节副本，而是把公司的 `.seq` / `.ab1`
-解析后重新写出的 FASTA，复制不出来，只能由 `prepare_test_data.R` 生成。
+`.fa` 文件保留在 Git 里：它们同样是 `test_data/` 的链接（`manifest.tsv` 里记着
+每个 `.fa` 对应的原始 `.seq`），只是 98 个加起来还不到 100 KB，没必要排除。
+公司的 `.seq` 交付文件本身已经是 FASTA，所以恢复出来的 `reference.self.fa`
+内容就是那份原始 `.seq`（校验方式与前四类相同：按 md5 与 `test_data/` 比对）。
 
 ### 需要重建整个链接层时
 

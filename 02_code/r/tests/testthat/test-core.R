@@ -101,6 +101,37 @@ test_that("方案 B 能对合成数据产生簇并计数", {
   }
 })
 
+test_that("比对不受路径中的空格影响", {
+  skip_if_not(
+    !is.null(nanoamp_tool_path("minimap2", required = FALSE)),
+    "minimap2 not available"
+  )
+  # align_reads() builds a minimap2 command line through system2(), which quotes
+  # `command` but pastes `args` verbatim. normalizePath() expands an 8.3 short
+  # path (C:\Users\JALENZ~1) into the long form (C:/Users/jalen zhong), so on
+  # many machines R's own tempdir already contains a space: without shQuote()
+  # the path was split into extra argv entries and minimap2 exited 1 with
+  # "failed to open file 'C:\Users\jalen'". This test uses a path that contains
+  # a space on purpose and must keep passing.
+  td <- file.path(tempfile("nanoamp space "), "reads with space")
+  dir.create(td, recursive = TRUE, showWarnings = FALSE)
+  ref <- make_random_seq(300, seed = 33)
+  fq <- file.path(td, "reads.fastq")
+  ref_fa <- file.path(td, "ref.fa")
+  write_test_fastq(rep(ref, 4), fq)
+  write_test_ref(ref, ref_fa)
+
+  expect_true(grepl(" ", normalizePath(td, winslash = "/")))
+
+  res <- run_mode_a(
+    fq, ref_fa, file.path(td, "out"),
+    top_n = 5, min_reads = 2, min_freq = 0.2, min_identity = 0.9
+  )
+  expect_equal(nrow(res$haplotypes), 1)
+  expect_true(res$haplotypes$is_reference[1])
+  expect_equal(res$qc$n_reads_used, 4)
+})
+
 test_that("ln_test_data manifest 指向存在的软链接", {
   manifest_path <- file.path(project_root_test_root(), "01_data", "ln_test_data", "manifest.tsv")
   skip_if_not(file.exists(manifest_path), "ln_test_data 尚未生成")

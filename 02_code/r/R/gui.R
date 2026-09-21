@@ -33,9 +33,11 @@ nanoamp_gui_open_dir <- function(path) {
   if (.Platform$OS.type == "windows") {
     try(shell.exec(path), silent = TRUE)
   } else if (identical(Sys.info()[["sysname"]], "Darwin")) {
-    try(system2("open", path), silent = TRUE)
+    # system2() quotes `command` but pastes `args` verbatim, so the path needs
+    # its own shQuote() or a directory containing a space opens the wrong thing.
+    try(system2("open", shQuote(path)), silent = TRUE)
   } else {
-    try(system2("xdg-open", path), silent = TRUE)
+    try(system2("xdg-open", shQuote(path)), silent = TRUE)
   }
   invisible(TRUE)
 }

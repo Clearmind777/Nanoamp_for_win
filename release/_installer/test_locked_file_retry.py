@@ -119,9 +119,21 @@ def main() -> int:
             shutil.copy2(py, holder)
             sleeper = root / "bin" / "loop.py"
             sleeper.write_text("import time\ntime.sleep(60)\n", encoding="ascii")
-            child = subprocess.Popen([str(holder), str(sleeper)])
+            # The stand-in is a copy of this interpreter, so it must be able to
+            # find its own runtime (python3xx.dll, vcruntime140.dll). Windows
+            # only looks next to the exe and on PATH, so a machine where
+            # python.exe is not on PATH would start a process that dies
+            # instantly with 0xC0000135 -- the case would then "pass" its delete
+            # step for the wrong reason and fail the assertion below. Give the
+            # child an environment that puts the real interpreter dir on PATH.
+            env = dict(os.environ)
+            env["PATH"] = str(Path(py).parent) + os.pathsep + env.get("PATH", "")
+            child = subprocess.Popen([str(holder), str(sleeper)], env=env)
             try:
                 time.sleep(1.0)  # let the process start and lock its own image
+                if child.poll() is not None:
+                    print(f"    (stand-in process exited early: {child.poll():#010x}; "
+                          "cannot exercise this case)")
                 ok, logs, elapsed = attempt(root)
                 gone = not root.exists()
                 show("nanoamp.exe still running (must stop it, then delete)",

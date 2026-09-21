@@ -45,10 +45,11 @@ copies.
 
 ## The .fa files stay in Git
 
-`*.fa` is deliberately not ignored: those files are *not* byte copies. They are
-re-parsed from the company's `.seq` / `.ab1` deliverables, so `materialize`
-could only copy them, never rebuild them. They are also tiny (98 files, under
-100 KB total).
+`*.fa` is deliberately not ignored: like the three ignored extensions it links
+into `test_data/` (every `.fa` row of `manifest.tsv` names the `.seq` it points
+at), but 98 files add up to under 100 KB, so there is no reason to exclude them.
+The company `.seq` deliverables are already FASTA, so the restored file *is*
+that source file, verified by the same md5 check as every other row.
 
 ## Regenerating the whole layer
 
