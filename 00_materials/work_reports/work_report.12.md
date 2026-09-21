@@ -341,6 +341,9 @@ bfbed45  fix: quote paths given to minimap2/samtools; correct QC metric docs
 5318beb  feat: add 取消操作 to install.exe, uninstall.exe and nanoamp.exe
 ```
 
+紧随其后是只改本报告的提交（`8a39510` 及之后同类的报告更新提交），
+用来把这次推送的结果写进报告；它们不含任何代码或结论的改动。
+
 父提交就是推送前远端 main 的尖端，因此这是一次 **fast-forward**，没有改写任何历史。
 改动 11 个文件（10 改 1 增），没有删除、没有动 `.fa` 链接层、没有动 `release/_offline`：
 `align.R`、`gui.R`、`test-core.R`、`test_locked_file_retry.py`、`README.md`、
