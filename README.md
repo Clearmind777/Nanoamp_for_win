@@ -331,8 +331,8 @@ release/             ← 发布产物：三个交付形态 + 安装器
 03_dependence/       内置的 minimap2.exe、R 环境脚本与编译方案
 00_materials/        委托文档、开发方案、历次工作报告、完整教程
   tutorial.md        教程：GUI 版 / CLI 版 / R 包版 + 依赖工具配置
-04_builds/           R 包构建产物（Git 忽略）
 tmp/test_results/    运行输出（Git 忽略）
+tmp/builds/          R CMD build / check 产物（Git 忽略）
 ```
 
 ### 开发环境搭建

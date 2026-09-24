@@ -6,7 +6,7 @@ help:
 	@echo "nanoamp (Windows variant) project targets:"
 	@echo "  make install          Install the R package (R CMD INSTALL $(R_PKG))"
 	@echo "  make test             Run testthat tests"
-	@echo "  make check            Build and R CMD check into 04_builds/r"
+	@echo "  make check            Build and R CMD check into tmp/builds/r"
 	@echo "  make cli              Run 'nanoamp doctor' from the repository CLI"
 	@echo "  make gui              Launch the Shiny GUI (browser based)"
 	@echo "  make gui-python       Launch the Python/Tkinter desktop GUI"
@@ -20,7 +20,7 @@ help:
 	@echo "  make toolchain        Install the MSYS2/MINGW-w64 build toolchain"
 	@echo "  make offline-bundle   Fetch the offline installer bundle into 03_dependence/offline-bundle/"
 	@echo "  make offline-install  Install everything from the bundle (no network)"
-	@echo "  make clean-builds     Remove 04_builds/r contents"
+	@echo "  make clean-builds     Remove tmp/builds contents"
 	@echo "  make clean-scratch    Remove build scratch (__pycache__, PyInstaller work dirs)"
 
 install:
@@ -30,10 +30,10 @@ test:
 	Rscript -e 'devtools::test("$(R_PKG)", reporter = "summary")'
 
 check:
-	mkdir -p 04_builds/r
+	mkdir -p tmp/builds/r
 	R CMD build $(R_PKG) --no-build-vignettes
-	mv nanoamp_*.tar.gz 04_builds/r/
-	cd 04_builds/r && R CMD check --no-manual --no-build-vignettes nanoamp_*.tar.gz
+	mv nanoamp_*.tar.gz tmp/builds/r/
+	cd tmp/builds/r && R CMD check --no-manual --no-build-vignettes nanoamp_*.tar.gz
 
 cli:
 	sh 02_code/cli/nanoamp doctor
@@ -56,10 +56,10 @@ gui-test:
 # --- release/ : the bundle that is handed to a user -------------------------
 # Rebuilds the payload pieces (R package tarball, GUI exe) into release/.
 release:
-	mkdir -p 04_builds/r release/01_R-package release/03_GUI
+	mkdir -p tmp/builds/r release/01_R-package release/03_GUI
 	R CMD build $(R_PKG) --no-build-vignettes
 	mv nanoamp_*.tar.gz release/01_R-package/
-	cp -f release/01_R-package/nanoamp_*.tar.gz 04_builds/r/ 2>/dev/null || true
+	cp -f release/01_R-package/nanoamp_*.tar.gz tmp/builds/r/ 2>/dev/null || true
 	python 02_code/PythonGUI/build_exe.py
 	cp -f 02_code/PythonGUI/dist/nanoamp.exe release/03_GUI/nanoamp.exe
 	@echo "Now run: make install-exe"
@@ -105,7 +105,7 @@ offline-install:
 	pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 
 clean-builds:
-	rm -rf 04_builds/r/*
+	rm -rf tmp/builds/*
 
 # Generated scratch that must never reach an asset (build_assets.py skips those
 # directories too, this just keeps the working tree tidy).

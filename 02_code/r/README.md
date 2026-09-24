@@ -40,7 +40,7 @@ From a built tarball (for example the one produced by `make check`; adjust the
 version if needed):
 
 ```r
-install.packages("04_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("tmp/builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
 ```
 
 From the source directory:

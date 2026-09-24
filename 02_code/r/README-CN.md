@@ -33,7 +33,7 @@ install.packages(c("shiny", "DT"))
 从构建好的 tar.gz 安装（例如 `make check` 生成的包；版本号按实际情况调整）：
 
 ```r
-install.packages("04_builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("tmp/builds/r/nanoamp_0.1.0.tar.gz", repos = NULL, type = "source")
 ```
 
 从源码目录安装：

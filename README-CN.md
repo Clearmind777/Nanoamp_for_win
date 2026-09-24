@@ -24,8 +24,8 @@ Linux 变体在姊妹仓库 `a_09_18_26_mapping_programs_dev_for_linux`。
   shared/         跨语言参数与输出契约
 03_dependence/    内置 minimap2.exe、编译方案、离网安装包、R 环境脚本
 release/          发布产物：三个交付形态 + 安装/卸载器
-04_builds/        R 构建包和 R CMD check 产物（Git 忽略）
 tmp/test_results/ 运行结果（除 README 外 Git 忽略）
+tmp/builds/       R CMD build / check 产物（Git 忽略）
 ```
 
 ## 快速开始
