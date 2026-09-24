@@ -203,6 +203,32 @@ def r_supported(rscript: Path) -> bool:
     return (v[0], v[1]) >= (MIN_R_MAJOR, MIN_R_MINOR)
 
 
+def r_choice(available_tags: list[str], system_version: tuple[int, int] | None,
+             minimum: tuple[int, int] = (MIN_R_MAJOR, MIN_R_MINOR)) -> str:
+    """Use the R already on this machine, or install the bundled one?
+
+    R's binary packages are only compatible within one minor version, and the
+    bundle carries packages for exactly one version (``contrib/<tag>``). So a
+    system R is usable only when the bundle has packages for that same version.
+
+    A system R that is merely "new enough" must therefore be rejected: with
+    R 4.5 next to a bundle of 4.6 packages, the dependency step could never
+    succeed, and the only thing the user would see is an install that fails
+    with no way forward. In that case the bundled R is installed next to the
+    app instead (it lives in the install directory and leaves the existing R
+    untouched).
+
+    Returns ``"system"`` or ``"bundled"``.
+    """
+    if system_version is None:
+        return "bundled"
+    if system_version < minimum:
+        return "bundled"
+    if available_tags and f"{system_version[0]}.{system_version[1]}" not in available_tags:
+        return "bundled"
+    return "system"
+
+
 # --------------------------------------------------------------------------
 # the install steps
 # --------------------------------------------------------------------------
@@ -557,15 +583,29 @@ class Installer:
             self.say(f"R 包文件     : R {tag} 共 {n} 个")
 
     def _ensure_r(self) -> bool:
+        # Only a system R whose version matches the bundled dependency packages
+        # can be used; otherwise install the bundled R (see r_choice).
+        wanted = self.ctx.available_r_tags()
         existing = find_rscript()
-        if existing and r_supported(existing):
-            ver = r_version(existing)
-            self.say(f"检测到已安装的 R {ver[0]}.{ver[1]}：{existing}")
+        system_version = r_version(existing) if existing else None
+
+        if existing and r_choice(wanted, system_version) == "system":
+            self.say(f"检测到已安装的 R {system_version[0]}.{system_version[1]}：{existing}")
             self.rscript = existing
             return True
 
         if existing:
-            self.say(f"检测到 R 版本过低，将安装新版（现有：{existing}）")
+            if system_version is None:
+                self.say(f"检测到 {existing}，但无法读取它的版本。")
+            elif system_version < (MIN_R_MAJOR, MIN_R_MINOR):
+                self.say(f"检测到 R 版本过低（{system_version[0]}.{system_version[1]}，"
+                         f"需要 ≥ {MIN_R_MAJOR}.{MIN_R_MINOR}），将安装随包提供的 R…")
+            else:
+                self.say(f"检测到已安装的 R {system_version[0]}.{system_version[1]}，"
+                         f"但安装包里的依赖包是为 R {', '.join(wanted)} 编译的"
+                         f"（R 的小版本之间二进制不兼容）。")
+                self.say("将改为安装随包提供的 R：它只装在 nanoamp 自己的目录里，"
+                         "不会改动也不会卸载你现有的 R。")
 
         installer = self.ctx.r_installer
         if installer is None:
@@ -648,7 +688,11 @@ class Installer:
             self.say(f"安装包内没有适配 R {tag} 的依赖包。")
             if tags:
                 self.say(f"安装包提供的是：{', '.join(tags)}")
-                self.say("请安装与安装包匹配的 R 版本，或获取对应版本的安装包。")
+                self.say("安装程序本应改用随包提供的 R，出现这一行说明包内缺少 R 安装器"
+                         "（_offline/r/R-*-win.exe）或安装包结构不完整。")
+            else:
+                self.say("安装包里没有任何 R 依赖包（_offline/r-packages 为空），"
+                         "无法离线安装依赖。")
             return False
 
         repo = self.ctx.repo_root.as_uri()

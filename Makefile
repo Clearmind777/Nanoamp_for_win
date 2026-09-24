@@ -70,6 +70,9 @@ release-test:
 	python release/_installer/test_release_layout.py
 	python release/_installer/test_window_fit.py
 	python release/_installer/test_locked_file_retry.py
+	python release/_installer/test_install_path_validation.py
+	python release/_installer/test_r_shortcut_cleanup.py
+	python release/_installer/test_r_version_choice.py
 
 release-check:
 	release/install.exe --check
