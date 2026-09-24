@@ -54,11 +54,16 @@ D:\nanoamp\
 ```
 
 > ⚠️ 不要直接在压缩包里双击运行，也不要放在桌面（桌面路径通常含中文用户名）。
-> 解压后应该能看到 `install.exe` 和 `_offline`、`01_R-package` 等文件夹。
+> 解压后应该能看到 `install.exe`、`01_R-package`、`deps` 等文件夹。
+>
+> **只需下载 `nanoamp-*-windows-setup.zip` 就够装了**：安装时会自动测速选源、
+> 联网下载固定版本的 R 依赖包。如果还想离线安装（更快、更稳、可断网装机），
+> 再把 `nanoamp-0.1.0-windows-offline-deps.zip` 解压到同一个 `nanoamp-windows\` 里，
+> 解压后会多出一个 `_offline` 文件夹。
 
 ### 第 2 步：双击 `install.exe`
 
-会弹出安装窗口，点**「开始安装」**，然后等 3–10 分钟。
+会弹出安装窗口，点**「开始安装」**，然后等 3–10 分钟（需要联网下载依赖时约 5–15 分钟，看网速）。
 
 窗口上方有两处可以按需调整，不确定就保持默认：
 
@@ -68,12 +73,12 @@ D:\nanoamp\
 | **在桌面创建快捷方式** | ☑ 勾选 | 不想动桌面就取消勾选 |
 | **把 nanoamp 命令加入 PATH** | ☑ 勾选 | 取消勾选则命令行需要用完整路径调用 |
 
-安装程序会自动做完这些事（**全程不需要联网，不需要管理员权限**）：
+安装程序会自动做完这些事（**不需要管理员权限**）：
 
 | 它会做的事 | 说明 |
 |---|---|
-| 找到或安装 R | R 是统计分析环境，nanoamp 依赖它。找不到就自动从安装包里装 |
-| 安装 R 依赖包 | 共 109 个，全部来自安装包，不联网下载 |
+| 找到或安装 R | R 是统计分析环境，nanoamp 依赖它。系统里的 R 版本与依赖包一致（当前 4.6）就直接用；否则安装自带的 R 4.6（装在安装目录里，不动你原有的 R） |
+| 安装 R 依赖包 | 共 109 个：**有 `_offline` 就离线装**；没有就自动测速选源（清华/中科大/北外/南大/阿里云/官方），按 `deps/pinned-R4.6.tsv` 里**固定的版本**下载并校验 |
 | 安装 nanoamp 主程序 | 核心分析引擎 |
 | 注册 `nanoamp` 命令 | 供命令行使用（可取消） |
 | 在桌面创建快捷方式 | 「nanoamp 分析工具」（可取消） |
@@ -209,13 +214,14 @@ D:\nanoamp\
 
 ### 双击 `install.exe` 没反应 / 一闪而过
 
-安装包可能没解压完整。重新解压，确认解压后目录里有 `_offline`、`01_R-package`、
-`03_GUI` 这几个文件夹。
+安装包可能没解压完整。重新解压，确认解压后目录里有 `deps`、`01_R-package`、
+`03_GUI`、`bin` 这几个文件夹（`_offline` 是可选的）。
 
 ### 提示「没有找到 R」
 
-安装包里应该带 `_offline\r\R-4.6.1-win.exe`。如果没有，到
-<https://cran.r-project.org/bin/windows/base/> 下载安装（全部点"下一步"），
+安装器会依次找：系统里已有的 R 4.6、随包提供的 `_offline\r\R-4.6.1-win.exe`、
+最后从刚测速选出的镜像下载 R 4.6.1。都拿不到时才会弹这个提示，此时可以到
+<https://cran.r-project.org/bin/windows/base/> 下载安装 R 4.6.x（全部点"下一步"），
 然后回到安装窗口点「重试」。
 
 ### 机器上已经装了 R，却提示 R 版本不对 / 装不上
@@ -242,6 +248,23 @@ R 的小版本之间二进制不兼容，所以：
 
 压缩包解压不完整，或者被杀毒软件删掉了部分文件。关掉杀毒软件重新解压，或换一个
 解压位置（**路径不要含中文和空格**）。
+
+> 从 0.1.4 起，没有 `_offline` 文件夹**不算**不完整：安装器会改成联网下载依赖
+> （需要 `deps\pinned-R4.6.tsv`，它就在 setup 包里）。
+
+### 没下离线依赖包 / 下载依赖很慢或失败
+
+109 个 R 依赖包有两种来源：
+
+| 情况 | 安装器怎么做 |
+|---|---|
+| 有 `_offline\` 文件夹 | 直接离线安装，**全程不联网**（推荐：把 offline-deps 包也解压到同一个 `nanoamp-windows\`） |
+| 没有 `_offline\` | 先并发测试 6 个镜像（清华 / 中科大 / 北外 / 南大 / 阿里云 / 官方）的下载速度，选最快的，再按 `deps\pinned-R4.6.tsv` 里**固定的版本**下载（约 160 MB），逐个校验版本 |
+
+安装窗口的日志里会显示测速结果、选中的镜像和下载进度。如果出现
+「下载失败：<包名> —— 已试过所有镜像」，说明网络不通或该版本已从镜像撤下，
+这时下载 `nanoamp-0.1.0-windows-offline-deps.zip` 解压到同一个 `nanoamp-windows\`
+再装一次即可（离线包里有完全相同的一套版本）。
 
 ### 分析时提示找不到 minimap2
 
@@ -294,7 +317,8 @@ release/             ← 发布产物：三个交付形态 + 一键安装器
   install.exe        一键安装器（构建产物）
   uninstall.exe      一键卸载器（构建产物）
   _installer/        安装器与卸载器源码
-  _offline/          离线依赖（R 安装器、R 包、minimap2）
+  deps/              固定版本依赖清单（联网安装用；进 setup 资产）
+  _offline/          离线依赖源材料（R 安装器、R 包、minimap2；进 offline-deps 资产）
 02_code/             源码
   r/                 nanoamp R 包源码
   cli/               CLI 入口脚本（make cli 用）
@@ -358,6 +382,8 @@ python release/_installer/test_installer_logic.py    # 安装器逻辑，不实�
 python release/_installer/test_release_layout.py     # 三个交付形态的布局自检
 python release/_installer/test_window_fit.py         # 两个窗口不会被内容挤出边界
 python release/_installer/test_locked_file_retry.py  # 文件被占用时的重试与报错
+python release/_installer/test_r_version_choice.py   # 系统 R / 随包 R 的选择规则
+python release/_installer/test_pinned_deps.py        # 固定版本清单、选源与 minimap2 来源
 ```
 
 查看两个窗口的实际长相（需要 `pip install pywinauto pillow`，仅开发用）：

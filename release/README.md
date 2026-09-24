@@ -6,12 +6,13 @@
 
 ```text
 release/
-|-- nanoamp-0.1.3-windows-setup.zip          ← 上传这个（约 33 MB）
-|-- nanoamp-0.1.0-windows-offline-deps.zip   ← 和上面一起上传（约 248 MB）
+|-- nanoamp-0.1.5-windows-setup.zip          ← 上传这个（约 34 MB，**单独也能装**）
+|-- nanoamp-0.1.0-windows-offline-deps.zip   ← 可选：装上就不用联网下载依赖（约 248 MB）
 |-- SHA256SUMS.txt      ← 两个 zip 的 sha256，随仓库提交，便于对账
 |-- build_assets.py     ← 重新生成上面两个 zip（内容逐条自校验）
+|-- deps/               ← 固定版本依赖清单 + 生成脚本（进 setup zip）
 |
-|-- install.exe          ← setup zip 的源材料（约 11 MB）
+|-- install.exe          ← setup zip 的源材料（约 12 MB）
 |-- uninstall.exe        ← setup zip 的源材料
 |-- 01_R-package/         R 包版：给要写 R 代码的同学
 |-- 02_CLI/               命令行版：给要批量处理样本的同学
@@ -21,18 +22,40 @@ release/
 `-- _offline/             offline-deps zip 的源材料：R 安装器 + 109 个 R 包 + minimap2
 ```
 
-两个 zip 的内部结构**共用一个根目录** `nanoamp-windows/`：
+内部结构**共用一个根目录** `nanoamp-windows/`：
 
 ```text
-nanoamp-windows/            ← 两个 zip 都解压到同一个地方
-|-- install.exe  uninstall.exe
-|-- 01_R-package/  02_CLI/  03_GUI/  _installer/  diagnose_install_env.*
-`-- _offline/               ← 来自 nanoamp-0.1.0-windows-offline-deps.zip
+nanoamp-windows/            ← 解压到同一个地方（两个 zip 会自动合并）
+|-- install.exe  uninstall.exe  README.md
+|-- 01_R-package/  02_CLI/  03_GUI/
+|-- deps/                    ← 固定版本清单 pinned-R4.6.tsv（联网安装要用）
+|-- bin/minimap2.exe         ← 比对程序（两个资产里是同一个文件）
+`-- _offline/                ← 来自 nanoamp-0.1.0-windows-offline-deps.zip（可选）
 ```
 
-> 两个 zip 合计约 280 MB。**248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 的硬限制，
-> 因此 zip 不进 Git**（`.gitignore` 已排除）；仓库里只提交 `SHA256SUMS.txt`，
-> 任何时候都能用它确认"这个资产是不是这个版本构建出来的"。
+### 只装 setup 包也能装完（联网）
+
+`deps/pinned-R4.6.tsv` 记录了 109 个 R 依赖包各自的**确切版本**、大小、md5/sha256
+和依赖关系（由 `deps/build_pinned_manifest.py` 从离线包生成）。安装时：
+
+1. 旁边有 `_offline/` → 直接离线安装，**完全不联网**（最快、最稳）；
+2. 没有 `_offline/` → 先并发测速选源（清华 TUNA / 中科大 / 北外 / 南大 / 阿里云 /
+   CRAN 官方），再按依赖顺序下载**清单里那些版本**，逐个读 zip 里的
+   `Package`/`Version` 校验（必须是同一版本；sha256 相同则额外记为"与离线包逐字节一致"），
+   最后一次性安装并校验关键包能否加载；
+3. 机器上连 R 都没有时，R 4.6.1 运行时也从同一镜像下载（大小与 sha256 与离线包里一致）。
+
+> 为什么要按"版本"而不是"字节"验收：镜像会重新编译二进制，同版本不同字节是常态
+> （例如 `generics_0.1.4.zip` 官方今天 86,409 B，离线包里 85,804 B）。
+> 109 个固定版本目前都还能从镜像取到；取不到时安装器会明确报错并建议改用离线包。
+
+比对程序 `minimap2.exe` 约 1.3 MB，**setup 包里也带一份**（`bin/minimap2.exe`），
+安装时复制到 `<安装目录>\bin\`。所以只装 setup 包的机器也能直接跑比对，
+不会出现"依赖装好了但没有 minimap2"的情况。离线依赖包里的
+`_offline/minimap2.exe` 是同一个文件，两个资产谁先解压都不会冲突。
+
+> **248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 的硬限制，因此 zip 不进 Git**
+> （`.gitignore` 已排除）；仓库里只提交 `SHA256SUMS.txt` 与 `deps/pinned-*.tsv`。
 
 ## 重新生成资产
 
@@ -48,10 +71,13 @@ copy 02_code\PythonGUI\dist\nanoamp.exe release\03_GUI\
 # 3. 一键安装器 + 一键卸载器 exe
 python release\_installer\build_exe.py
 
-# 4. 打包成两个资产 zip，并重写 SHA256SUMS.txt
+# 4. 固定版本依赖清单（离线包换了内容时才需要；平时已提交在 release/deps/）
+python release\deps\build_pinned_manifest.py
+
+# 5. 打包成两个资产 zip，并重写 SHA256SUMS.txt
 python release\build_assets.py
 
-# 5. 只校验（不重建）：解压后每条内容与源材料逐字节比对
+# 6. 只校验（不重建）：解压后每条内容与源材料逐字节比对
 python release\build_assets.py --verify-only
 ```
 
@@ -70,25 +96,32 @@ python release\build_assets.py --compare-published <下载的 setup.zip> <下载
 
 ## 上传
 
-**v0.1.3 已经发布**：
+**v0.1.3 是最后一个已发布的版本，v0.1.4 与 v0.1.5 都还没有发布**：
 
 ```text
-release : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
-tag     : v0.1.3（annotated，指向 a00c83c）
-asset   : nanoamp-0.1.3-windows-setup.zip   33,198,534 B
-          sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
+已发布  : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
+          tag v0.1.3 → a00c83c
+          asset nanoamp-0.1.3-windows-setup.zip  33,198,534 B
+                 sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
+
+未发布  : release/nanoamp-0.1.5-windows-setup.zip
+          0.1.4 增加了"没有离线包也能联网安装（固定版本、自动选源）"
+          0.1.5 补上 bin/minimap2.exe（联网装的机器也有比对程序）
+                    + GUI 直接按 <安装目录>\bin\minimap2.exe 定位比对程序
+          sha256 见 release/SHA256SUMS.txt
 ```
 
-只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已经作为 **v0.1.2** 的附件
-发布（sha256 `16035340…`），0.1.3 的发布说明直接链接到它 —— 这样每次发版只传约 32 MB。
+v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已经作为
+**v0.1.2** 的附件发布（sha256 `16035340…`），发布说明直接链接到它。
 **因此不要删除 v0.1.2 的 Release**，否则那个链接会失效。
+从 0.1.4 起 setup 包单独也能装完（联网下载固定版本的依赖），离线包只是"更快更稳"的选项。
 
 下次发版：先更新 `build_assets.py` 里的 `SETUP_VERSION` 与文件名，重建资产，然后
 
 ```powershell
-gh release create v0.1.4 `
-  release\nanoamp-0.1.4-windows-setup.zip `
-  --title "nanoamp 0.1.4 — Windows 版" --notes-file <说明.md>
+gh release create v0.1.5 `
+  release\nanoamp-0.1.5-windows-setup.zip `
+  --title "nanoamp 0.1.5 — Windows 版" --notes-file <说明.md>
 ```
 
 或在 GitHub 网页上建 tag + 上传。名字不要改：使用者按
@@ -97,10 +130,11 @@ gh release create v0.1.4 `
 
 ## 使用者怎么用
 
-**只要做两件事：**
+**只下 setup 包也行**（安装时会自动联网下载固定版本的依赖）：
 
-1. 把整个 `release` 文件夹解压到**路径不含中文和空格**的位置，例如 `D:\nanoamp\`
-2. 双击 **`install.exe`**，在窗口里点「开始安装」，等 3–10 分钟
+1. 把 `nanoamp-0.1.5-windows-setup.zip` 解压到**路径不含中文和空格**的位置，例如 `D:\nanoamp\`
+2. 双击解压出来的 **`install.exe`**，点「开始安装」；想避免联网就再把
+   `nanoamp-0.1.0-windows-offline-deps.zip` 也解压到同一个 `nanoamp-windows\` 里
 
 装完之后：
 
@@ -130,12 +164,13 @@ gh release create v0.1.4 `
 
 | 步骤 | 说明 |
 |---|---|
-| 1. 检查并安装 R | 先找系统里已有的 R（要求 ≥ 4.2）：**只有当它的版本和 `_offline/r-packages/` 里的依赖包一致（当前 4.6）时才用它**；版本不一致（例如机器上装的是 R 4.5）就用 `_offline/r/` 里的安装器静默安装自带的 R 4.6 —— 它装在安装目录内的 `R\R-runtime`，**不改动也不卸载你现有的 R** |
-| 2. 安装 R 依赖包 | 从 `_offline/r-packages/` 本地仓库安装 109 个包，**全程不联网** |
+| 1. 检查并安装 R | 先找系统里已有的 R（要求 ≥ 4.2）：**只有当它的版本和依赖包一致（当前 4.6）时才用它**；版本不一致（例如机器上装的是 R 4.5）就静默安装随包的 R 4.6 —— 它装在安装目录内的 `R\R-runtime`，**不改动也不卸载你现有的 R** |
+| 2. 安装 R 依赖包 | 旁边有 `_offline/r-packages/` 就**离线**装 109 个包；没有就测速选源、按 `deps/pinned-R4.6.tsv` 的**固定版本**联网下载（校验 zip 内的 `Package`/`Version`），再一次性安装 |
 | 3. 安装 nanoamp 主程序 | 从 `01_R-package/nanoamp_0.1.0.tar.gz` 安装 |
 | 4. 注册 `nanoamp` 命令 | 生成 `nanoamp.cmd` 并把 `<安装目录>\bin` 加入用户 PATH（可取消） |
-| 5. 创建桌面快捷方式 | 指向安装好的图形界面（可取消） |
-| 6. 自检 | 检查包、依赖、minimap2 是否就绪 |
+| 5. 安装比对程序 | 把 `bin/minimap2.exe`（或 `_offline/minimap2.exe`）复制到 `<安装目录>\bin\minimap2.exe` |
+| 6. 创建桌面快捷方式 | 指向安装好的图形界面（可取消） |
+| 7. 自检 | 检查包、依赖、minimap2 是否就绪 |
 
 安装位置默认是 `%LOCALAPPDATA%\nanoamp`，**可以在窗口里改**。
 
@@ -195,22 +230,25 @@ uninstall.exe --silent --keep-runtime         :: 保留随程序安装的 R
 > 注意：控制台模式需要能看到 stdout 的环境（普通 cmd / PowerShell 窗口），
 > 直接双击不带参数时才弹图形窗口。
 
-## 重要：两个 zip 要解压到同一个文件夹
+## 重要：setup 包单独就能装；两个 zip 最好解压到同一个文件夹
 
-`install.exe` 和 `uninstall.exe` 各约 11 MB，**离线依赖（约 250 MB）在
-`nanoamp-0.1.0-windows-offline-deps.zip` 里**。使用者要把
-`nanoamp-0.1.3-windows-setup.zip` 与 `nanoamp-0.1.0-windows-offline-deps.zip`
-**解压到同一个目录**（两者都以 `nanoamp-windows/` 为根），再双击里面的
-`install.exe`。只解压 setup 包就运行，`install.exe` 会报「安装包不完整」。
+`install.exe` 和 `uninstall.exe` 各约 11 MB。**只解压
+`nanoamp-0.1.5-windows-setup.zip` 就能装完**：`deps/pinned-R4.6.tsv` 里带着
+依赖包的确切版本，安装器会自动测速选源、联网下载（约 159 MB，视网速 5–15 分钟），
+`bin/minimap2.exe` 也已经在 setup 包里。
 
-这样做是刻意的：如果把 250 MB 依赖打进 exe，每次启动都要自解压，既慢又占空间。
+想让这一步变成"完全不联网"，就把
+`nanoamp-0.1.0-windows-offline-deps.zip`（约 248 MB）**也解压到同一个目录**
+（两者都以 `nanoamp-windows/` 为根），安装器看到 `_offline/` 就直接离线安装。
+
+如果把 250 MB 依赖打进 exe，每次启动都要自解压，既慢又占空间，所以离线依赖单独成包。
 
 `uninstall.exe` 不依赖 `_offline/`，单独拷走也能用。
 
 ## 环境要求
 
 - **Windows 10 / 11，64 位**
-- 不需要联网
+- **联网可选**：只装 setup 包时需要联网下载依赖；解压了离线依赖包则全程不需要联网
 - 不需要管理员权限
 - 首次安装约需 1.5 GB 磁盘空间（R 约 0.5 GB + 109 个 R 包约 0.35 GB + 余量）
 - **不需要 conda，不需要 WSL**
@@ -243,4 +281,6 @@ python release\_installer\test_installer_logic.py
 python release\_installer\test_release_layout.py
 python release\_installer\test_window_fit.py         # 窗口不会被内容挤出边界
 python release\_installer\test_locked_file_retry.py  # 文件被占用时重试并报错
+python release\_installer\test_r_version_choice.py   # 系统 R 与随包 R 的选择规则
+python release\_installer\test_pinned_deps.py        # 固定版本清单、选源、minimap2 来源
 ```

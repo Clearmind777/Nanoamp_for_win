@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 """Build the two GitHub Release assets from this repository.
 
-The published release (v0.1.2) carries exactly two files, and this script
-reproduces that layout:
+Two assets, both rooted at `nanoamp-windows/`:
 
-    nanoamp-0.1.3-windows-setup.zip          install.exe + uninstall.exe +
-                                            01_R-package/ + 02_CLI/ + 03_GUI/
-                                            (+ installer sources)
+    nanoamp-0.1.5-windows-setup.zip          install.exe + uninstall.exe +
+                                            README.md + 01_R-package/ +
+                                            02_CLI/ + 03_GUI/ + deps/ + bin/
     nanoamp-0.1.0-windows-offline-deps.zip   _offline/  (R installer, 109 R
                                             package binaries, minimap2.exe)
 
@@ -14,8 +13,15 @@ Both archives use the same single root folder, `nanoamp-windows/`, so the user
 unpacks them into one directory and double-clicks `install.exe`:
 
     nanoamp-windows/
-      install.exe  uninstall.exe  01_R-package/  02_CLI/  03_GUI/
-      _offline/            <- from the second asset
+      install.exe  uninstall.exe  01_R-package/  02_CLI/  03_GUI/  deps/  bin/
+      _offline/            <- from the second asset (optional)
+
+The setup package alone is enough to install: without `_offline/` the installer
+reads `deps/pinned-R<tag>.tsv`, picks the fastest mirror and downloads exactly
+the versions listed there (plus R itself, if the machine has none). The offline
+package just makes that step unnecessary. `bin/minimap2.exe` is the same binary
+as `_offline/minimap2.exe`, included in the setup asset so an online-only
+install still ends up with a working aligner.
 
 Usage:
     python release/build_assets.py                 # build both zips here
@@ -39,14 +45,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = "nanoamp-windows"
 
-SETUP_VERSION = "0.1.3"
+SETUP_VERSION = "0.1.5"
 SETUP_ZIP = f"nanoamp-{SETUP_VERSION}-windows-setup.zip"
 OFFLINE_ZIP = "nanoamp-0.1.0-windows-offline-deps.zip"
 
-# What goes into the setup asset (relative to this directory). This mirrors the
-# published v0.1.2 setup asset exactly: 14 entries, with the README at the root
-# and without the installer sources (`_installer/` stays in the repository for
-# developers, and is not shipped).
+# What goes into the setup asset (relative to this directory). Same shape as the
+# published v0.1.2 setup asset (README at the root, no installer sources), plus
+# `deps/`: the pinned dependency list that lets install.exe install without the
+# offline package (it then picks the fastest mirror and downloads those exact
+# versions).
 SETUP_ITEMS = [
     "install.exe",
     "uninstall.exe",
@@ -54,9 +61,22 @@ SETUP_ITEMS = [
     "01_R-package",
     "02_CLI",
     "03_GUI",
+    "deps",
 ]
+# Shipped under a different name than in the tree: the aligner is kept once, in
+# `_offline/` (shared with the offline asset), but every install needs it, so
+# the setup asset carries it as `bin/minimap2.exe` -- the location install.exe
+# copies from and the location it installs to.
+SETUP_EXTRA = [("_offline/minimap2.exe", "bin/minimap2.exe")]
 # What goes into the offline-dependencies asset.
 OFFLINE_ITEMS = ["_offline"]
+OFFLINE_EXTRA: list[tuple[str, str]] = []
+
+# (asset name, tree items, files renamed on the way in)
+ASSETS = [
+    (SETUP_ZIP, SETUP_ITEMS, SETUP_EXTRA),
+    (OFFLINE_ZIP, OFFLINE_ITEMS, OFFLINE_EXTRA),
+]
 
 # Fixed timestamp so the same inputs give the same archive bytes.
 ZIP_DATE = (2026, 9, 22, 0, 0, 0)
@@ -65,8 +85,13 @@ ZIP_DATE = (2026, 9, 22, 0, 0, 0)
 SKIP_DIRS = {"__pycache__", "build", "dist", ".pytest_cache", ".mypy_cache"}
 
 
-def iter_files(items: list[str]):
-    """Yield (source path, archive path) for every file under *items*."""
+def iter_files(items: list[str], extra: list[tuple[str, str]] = ()):
+    """Yield (source path, archive path) for every file under *items*.
+
+    *extra* adds files that are stored under a different name in the archive:
+    each entry is (path relative to this directory, archive path relative to the
+    asset root).
+    """
     for item in items:
         path = HERE / item
         if path.is_dir():
@@ -80,11 +105,16 @@ def iter_files(items: list[str]):
             yield path, f"{ROOT}/{item}"
         else:
             raise SystemExit(f"missing: {path}")
+    for src_rel, arc_rel in extra:
+        src = HERE / src_rel
+        if not src.is_file():
+            raise SystemExit(f"missing: {src}")
+        yield src, f"{ROOT}/{arc_rel}"
 
 
-def make_zip(target: Path, items: list[str]) -> tuple[int, int]:
+def make_zip(target: Path, items: list[str], extra=()) -> tuple[int, int]:
     """Write *target*; return (file count, total uncompressed bytes)."""
-    files = list(iter_files(items))
+    files = list(iter_files(items, extra))
     target.unlink(missing_ok=True)
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for src, arc in files:
@@ -95,13 +125,13 @@ def make_zip(target: Path, items: list[str]) -> tuple[int, int]:
     return len(files), sum(s.stat().st_size for s, _ in files)
 
 
-def verify_zip(target: Path, items: list[str]) -> None:
+def verify_zip(target: Path, items: list[str], extra=()) -> None:
     """Every entry must match its source file byte for byte."""
     with zipfile.ZipFile(target) as zf:
         bad = zf.testzip()
         if bad:
             raise SystemExit(f"{target.name}: corrupt entry {bad}")
-        expected = {arc: src for src, arc in iter_files(items)}
+        expected = {arc: src for src, arc in iter_files(items, extra)}
         names = set(zf.namelist())
         if names != set(expected):
             missing = sorted(set(expected) - names)[:5]
@@ -157,18 +187,18 @@ def main() -> int:
         return rc
 
     if not args.verify_only:
-        for name, items in ((SETUP_ZIP, SETUP_ITEMS), (OFFLINE_ZIP, OFFLINE_ITEMS)):
+        for name, items, extra in ASSETS:
             target = HERE / name
-            n, total = make_zip(target, items)
+            n, total = make_zip(target, items, extra)
             print(f"built {name}: {n} files, {total / 1e6:.1f} MB uncompressed, "
                   f"{target.stat().st_size / 1e6:.1f} MB packed")
 
     lines = []
-    for name, items in ((SETUP_ZIP, SETUP_ITEMS), (OFFLINE_ZIP, OFFLINE_ITEMS)):
+    for name, items, extra in ASSETS:
         target = HERE / name
         if not target.is_file():
             raise SystemExit(f"missing {target}; run without --verify-only first")
-        verify_zip(target, items)
+        verify_zip(target, items, extra)
         lines.append(f"{sha256(target)}  {name}")
     (HERE / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="ascii")
     print("wrote SHA256SUMS.txt")

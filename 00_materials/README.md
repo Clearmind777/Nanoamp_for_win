@@ -27,7 +27,9 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.11.md      # repository slimming, layout rename, installer window fixes
     |-- work_report.12.md      # local data-layer repair, paths with spaces, doc corrections
     |-- work_report.13.md      # 01_data without a link layer, release assets as zips
-    `-- work_report.14.md      # installer: pick an R the bundled packages can actually use
+    |-- work_report.14.md      # installer: pick an R the bundled packages can actually use
+    `-- work_report.15.md      # install without the offline package: pinned versions, mirror
+                               #   probing, and the minimap2 the online route was missing
 ```
 
 Start with `programs_dev_info.md` for the original request and

@@ -90,19 +90,34 @@ def _build(name: str) -> bool:
 
 def _verify_payload_visible() -> None:
     ok = True
-    for name in ("_offline", "01_R-package", "03_CLI", "02_CLI", "03_GUI"):
+    for name in ("_offline", "01_R-package", "02_CLI", "03_GUI", "deps"):
         p = RELEASE / name
         if p.exists():
             print(f"  OK      {name}")
-        elif name in ("_offline", "01_R-package", "03_GUI"):
+        elif name == "_offline":
+            print("  note    _offline not present "
+                  "(optional: build_assets.py packages deps/ so install.exe can download)")
+        else:
             print(f"  MISSING {name}")
             ok = False
     r_installers = list((RELEASE / "_offline" / "r").glob("R-*-win.exe"))
     pkgs = list((RELEASE / "_offline" / "r-packages").rglob("*.zip"))
-    print(f"  R installer : {r_installers[0].name if r_installers else 'MISSING'}")
-    print(f"  R packages  : {len(pkgs)}")
-    if not r_installers or not pkgs:
-        print("\nWARNING: release tree is incomplete; the installer will refuse to run.")
+    manifest = list((RELEASE / "deps").glob("pinned-R*.tsv"))
+    print(f"  R installer : {r_installers[0].name if r_installers else 'not present (online install)'}")
+    print(f"  R packages  : {len(pkgs)}" if pkgs else "  R packages  : 0 (online install uses deps/pinned-R*.tsv)")
+    print(f"  pinned set  : {manifest[0].name if manifest else 'MISSING'}")
+    aligner = RELEASE / "_offline" / "minimap2.exe"
+    print(f"  minimap2    : {aligner.relative_to(RELEASE).as_posix() if aligner.is_file() else 'MISSING'}"
+          "  -> packaged as bin/minimap2.exe in the setup asset")
+    # The installer needs *a* way to get dependencies and an aligner: the
+    # offline bundle, the pinned manifest, or both.
+    if not r_installers and not manifest:
+        print("\nWARNING: neither an offline bundle nor deps/pinned-R*.tsv is present;")
+        print("         install.exe will refuse to run on a machine without R.")
+        ok = False
+    if not aligner.is_file():
+        print("\nWARNING: no _offline/minimap2.exe to package as bin/minimap2.exe;")
+        print("         the aligner step would fail.")
         ok = False
     _ = ok
 

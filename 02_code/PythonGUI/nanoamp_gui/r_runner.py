@@ -261,6 +261,13 @@ class NanoampRunner:
         libs = _candidate_libs(self.repo_root)
         if libs:
             env["R_LIBS_USER"] = os.pathsep.join(libs)
+        # Point R straight at the aligner install.exe put in <home>\bin. Without
+        # this the R package falls back to searching PATH, which an already
+        # running Explorer may not have refreshed after the install, and the
+        # analysis then fails with "External tool 'minimap2' not found".
+        minimap2 = self.repo_root / "bin" / "minimap2.exe"
+        if minimap2.is_file():
+            env["NANOAMP_MINIMAP2"] = str(minimap2)
         return env
 
     # -- invocation ---------------------------------------------------------

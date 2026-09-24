@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import configparser
 import ctypes
+import hashlib
 import os
 import queue
 import re
@@ -230,6 +231,201 @@ def r_choice(available_tags: list[str], system_version: tuple[int, int] | None,
 
 
 # --------------------------------------------------------------------------
+# pinned dependency set + mirrors
+#
+# The setup package alone must be installable: when `_offline/` is absent the
+# installer downloads R (if needed) and the dependency packages from a mirror.
+# Versions are pinned by `deps/pinned-R<tag>.tsv`, which is generated from the
+# offline bundle, so the online route installs exactly the set the offline
+# bundle carries -- never "whatever the mirror has today" -- and every file is
+# checked against the recorded sha256 before it is installed.
+# --------------------------------------------------------------------------
+R_TAG_DEFAULT = "4.6"
+DEPS_DIR = "deps"
+# Payload directory of the setup asset holding external tools (minimap2.exe).
+BIN_DIR = "bin"
+DEPS_MANIFEST_ENV = "NANOAMP_DEPS_MANIFEST"
+
+# (label, CRAN base, Bioconductor base). The Bioconductor bases all use the
+# same layout as bioconductor.org: <base>packages/<bioc>/bioc/bin/windows/...
+MIRRORS: list[tuple[str, str, str | None]] = [
+    ("清华 TUNA", "https://mirrors.tuna.tsinghua.edu.cn/CRAN/",
+     "https://mirrors.tuna.tsinghua.edu.cn/bioconductor/"),
+    ("中科大 USTC", "https://mirrors.ustc.edu.cn/CRAN/",
+     "https://mirrors.ustc.edu.cn/bioc/"),
+    ("北外 BFSU", "https://mirrors.bfsu.edu.cn/CRAN/",
+     "https://mirrors.bfsu.edu.cn/bioconductor/"),
+    ("南大 NJU", "https://mirror.nju.edu.cn/CRAN/",
+     "https://mirror.nju.edu.cn/bioconductor/"),
+    ("阿里云", "https://mirrors.aliyun.com/CRAN/", None),
+    ("CRAN/Bioconductor 官方", "https://cloud.r-project.org/", "https://bioconductor.org/"),
+]
+
+
+@dataclass(frozen=True)
+class PinnedPackage:
+    name: str
+    version: str
+    size: int
+    md5: str
+    sha256: str
+    deps: tuple[str, ...]
+
+    @property
+    def filename(self) -> str:
+        return f"{self.name}_{self.version}.zip"
+
+
+@dataclass(frozen=True)
+class PinnedSet:
+    """The exact dependency set the offline bundle was built from."""
+
+    r_tag: str
+    bioconductor: str
+    r_installer_name: str
+    r_installer_size: int
+    r_installer_sha256: str
+    packages: dict[str, PinnedPackage]
+
+    def order(self) -> list[PinnedPackage]:
+        """Packages topologically sorted so dependencies install first."""
+        done: list[str] = []
+        seen: set[str] = set()
+
+        def visit(name: str, stack: set[str]) -> None:
+            if name in seen or name in stack:
+                return
+            pkg = self.packages.get(name)
+            if pkg is None:
+                return
+            stack.add(name)
+            for dep in pkg.deps:
+                visit(dep, stack)
+            stack.discard(name)
+            seen.add(name)
+            done.append(name)
+
+        for name in sorted(self.packages):
+            visit(name, set())
+        return [self.packages[n] for n in done]
+
+
+def load_pinned_set(path: Path) -> PinnedSet | None:
+    """Read `deps/pinned-R<tag>.tsv`; None when it is missing or unreadable."""
+    if not path.is_file():
+        return None
+    meta: dict[str, list[str]] = {}
+    packages: dict[str, PinnedPackage] = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            header: list[str] | None = None
+            for raw in fh:
+                line = raw.rstrip("\n")
+                if not line.strip():
+                    continue
+                if line.startswith("#"):
+                    parts = line.lstrip("# ").split("\t")
+                    if parts and parts[0]:
+                        meta[parts[0]] = parts[1:]
+                    continue
+                fields = line.split("\t")
+                if header is None:
+                    header = fields
+                    continue
+                row = dict(zip(header, fields))
+                deps = tuple(d for d in (row.get("deps") or "").split(";") if d)
+                packages[row["package"]] = PinnedPackage(
+                    name=row["package"], version=row["version"],
+                    size=int(row["bytes"]), md5=row["md5"], sha256=row["sha256"],
+                    deps=deps)
+    except (OSError, ValueError, KeyError):
+        return None
+    if not packages:
+        return None
+    runtime = meta.get("r_installer", ["", "0", ""])
+    return PinnedSet(
+        r_tag=(meta.get("r_tag") or [R_TAG_DEFAULT])[0],
+        bioconductor=(meta.get("bioconductor") or [""])[0],
+        r_installer_name=runtime[0],
+        r_installer_size=int(runtime[1] or 0),
+        r_installer_sha256=runtime[2] if len(runtime) > 2 else "",
+        packages=packages,
+    )
+
+
+def rank_mirrors(speeds: list[tuple[str, float | None]]) -> list[str]:
+    """Order mirror labels: fastest first, unreachable ones last.
+
+    Split out so the ordering rule can be tested without a network.
+    """
+    reachable = sorted(((s, n) for n, s in speeds if s), key=lambda item: -item[0])
+    unreachable = [n for n, s in speeds if not s]
+    return [n for _, n in reachable] + unreachable
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def zip_package_identity(path: Path) -> tuple[str, str] | None:
+    """(Package, Version) from a Windows binary package zip's DESCRIPTION.
+
+    Mirrors re-build binaries from time to time, so the bytes of a package zip
+    are not a stable identity -- the version is. This is what the downloader
+    checks; a matching sha256 is then reported as "identical to the offline
+    copy", not required.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = [n for n in zf.namelist()
+                     if n.endswith("DESCRIPTION") and n.count("/") == 1]
+            if not names:
+                return None
+            text = zf.read(names[0]).decode("utf-8", "replace")
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+
+    fields: dict[str, str] = {}
+    key: str | None = None
+    for line in text.splitlines():
+        if line[:1] in (" ", "\t") and key:
+            fields[key] += " " + line.strip()
+        elif ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip()
+            fields[key] = value.strip()
+        else:
+            key = None
+    package, version = fields.get("Package"), fields.get("Version")
+    if not package or not version:
+        return None
+    return package, version
+
+
+def http_get(url: str, timeout: float = 60, dest: Path | None = None) -> bytes:
+    """Download over HTTPS with the stdlib (no extra dependency)."""
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": "nanoamp-installer"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if dest is None:
+            return resp.read()
+        with open(dest, "wb") as fh:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+    return b""
+
+
+# --------------------------------------------------------------------------
 # the install steps
 # --------------------------------------------------------------------------
 @dataclass
@@ -282,11 +478,19 @@ class Context:
         return self.repo_root / "bin" / "windows" / "contrib" / r_tag
 
     def available_r_tags(self) -> list[str]:
-        """R version tags actually present in the bundled repository."""
+        """R version tags this installer can serve.
+
+        The bundled repository when it is present, otherwise the tag declared by
+        the pinned set: the online route downloads exactly that version, so the
+        R-selection rule (``r_choice``) behaves identically either way.
+        """
         base = self.repo_root / "bin" / "windows" / "contrib"
-        if not base.is_dir():
-            return []
-        return sorted((d.name for d in base.iterdir() if d.is_dir()), reverse=True)
+        if base.is_dir():
+            tags = sorted((d.name for d in base.iterdir() if d.is_dir()), reverse=True)
+            if tags:
+                return tags
+        pinned = self.pinned
+        return [pinned.r_tag] if pinned else []
 
     @property
     def r_installer(self) -> Path | None:
@@ -295,6 +499,48 @@ class Context:
             return None
         exes = sorted(rdir.glob("R-*-win.exe"))
         return exes[-1] if exes else None
+
+    @property
+    def minimap2_exe(self) -> Path | None:
+        """Where the aligner comes from.
+
+        The setup asset ships its own copy under ``bin/`` so that a machine
+        installing without the offline package still gets a working aligner;
+        ``_offline/minimap2.exe`` is the same binary in the offline asset. The
+        last candidate only matches when install.exe is run from a checkout.
+        """
+        candidates = (
+            self.offline / "minimap2.exe",
+            self.root / BIN_DIR / "minimap2.exe",
+            self.root.parent / "03_dependence" / "windows-x86_64" / "bin" / "minimap2.exe",
+        )
+        for cand in candidates:
+            if cand.is_file():
+                return cand
+        return None
+
+    @property
+    def deps_manifest(self) -> Path | None:
+        """The pinned dependency set shipped with the setup package."""
+        env = os.environ.get(DEPS_MANIFEST_ENV, "").strip()
+        if env and Path(env).is_file():
+            return Path(env)
+        candidates = [self.root / DEPS_DIR / f"pinned-R{R_TAG_DEFAULT}.tsv"]
+        deps_dir = self.root / DEPS_DIR
+        if deps_dir.is_dir():
+            candidates += sorted(deps_dir.glob("pinned-R*.tsv"))
+        for cand in candidates:
+            if cand.is_file():
+                return cand
+        return None
+
+    @property
+    def pinned(self) -> PinnedSet | None:
+        """Loaded once; the online route needs it, the offline one does not."""
+        if not hasattr(self, "_pinned_cache"):
+            path = self.deps_manifest
+            self._pinned_cache = load_pinned_set(path) if path else None
+        return self._pinned_cache
 
     @property
     def pkg_tarball(self) -> Path | None:
@@ -561,18 +807,40 @@ class Installer:
         self.say(f"安装目标目录 : {self.ctx.install_root}")
         self.say(f"R 包库目录   : {self.lib}")
 
+        # Two ways to get the dependencies: the offline bundle that ships next
+        # to install.exe, or the pinned set (deps/pinned-R<tag>.tsv) plus a
+        # mirror. Only when neither is available is the package "incomplete".
+        bundled = self.ctx.r_installer is not None
+        bundled_repo = bool(self.ctx.available_r_tags()) and self.ctx.repo_root.is_dir()
+        pinned = self.ctx.pinned
+
         missing = []
-        if self.ctx.r_installer is None and find_rscript() is None:
+        if not bundled and find_rscript() is None and pinned is None:
             missing.append("_offline/r/R-*-win.exe（R 安装器）")
-        if not self.ctx.available_r_tags():
-            missing.append("_offline/r-packages/bin/windows/contrib/<版本>/*.zip（R 包）")
+        if not bundled_repo and pinned is None:
+            missing.append("_offline/r-packages/bin/windows/contrib/<版本>/*.zip（R 包）"
+                           "，或 deps/pinned-R<版本>.tsv（联网下载用的固定版本清单）")
         if self.ctx.pkg_tarball is None:
             missing.append("01_R-package/nanoamp_*.tar.gz（主程序）")
+        if self.ctx.minimap2_exe is None:
+            missing.append("bin/minimap2.exe（比对程序，或离线包里的 _offline/minimap2.exe）")
         if missing:
             raise RuntimeError(
                 "安装包不完整，缺少以下文件：\n\n  " + "\n  ".join(missing) +
                 "\n\n请重新完整解压安装包后重试。"
             )
+
+        if bundled_repo:
+            total = sum(len(list(self.ctx.extra_dir(t).glob("*.zip")))
+                        for t in self.ctx.available_r_tags())
+            self.say(f"离线依赖包   : 已找到（R {', '.join(self.ctx.available_r_tags())}"
+                     f"，共 {total} 个包，安装时不再联网）")
+        else:
+            self.say("离线依赖包   : 未找到")
+            self.say(f"                将先测速选源，再按固定版本下载 R 依赖包"
+                     f"（{len(pinned.packages)} 个，清单 {self.ctx.deps_manifest.name}）")
+            if find_rscript() is None and not bundled:
+                self.say("                机器上没有 R，也会一并从同一镜像下载 R 运行时")
 
         free = shutil.disk_usage(str(self.ctx.install_root.anchor or "C:")).free
         need = 1500 * 1024 * 1024  # ~1.5 GB with headroom
@@ -608,6 +876,8 @@ class Installer:
                          "不会改动也不会卸载你现有的 R。")
 
         installer = self.ctx.r_installer
+        if installer is None:
+            installer = self._download_r_installer()
         if installer is None:
             self.say("未找到 R 安装器，且系统内没有可用的 R。")
             self.events.put(("ask_r",))
@@ -683,18 +953,12 @@ class Installer:
             return False
         tag = f"{ver[0]}.{ver[1]}"
         pkg_dir = self.ctx.extra_dir(tag)
-        if not pkg_dir.is_dir():
-            tags = self.ctx.available_r_tags()
-            self.say(f"安装包内没有适配 R {tag} 的依赖包。")
-            if tags:
-                self.say(f"安装包提供的是：{', '.join(tags)}")
-                self.say("安装程序本应改用随包提供的 R，出现这一行说明包内缺少 R 安装器"
-                         "（_offline/r/R-*-win.exe）或安装包结构不完整。")
-            else:
-                self.say("安装包里没有任何 R 依赖包（_offline/r-packages 为空），"
-                         "无法离线安装依赖。")
-            return False
+        if pkg_dir.is_dir():
+            return self._install_deps_from_bundle(tag, pkg_dir)
+        return self._install_deps_online(tag)
 
+    def _install_deps_from_bundle(self, tag: str, pkg_dir: Path) -> bool:
+        """Install from `_offline/r-packages` - no network involved."""
         repo = self.ctx.repo_root.as_uri()
         lib = str(self.lib).replace("\\", "/")
         script = self._write_temp_r("install_deps", f"""
@@ -710,7 +974,7 @@ ok <- requireNamespace("Biostrings", quietly = TRUE) &&
 cat("关键依赖检查:", ok, "\\n")
 if (!ok) stop("关键依赖安装后仍不可用")
 """)
-        self.say(f"使用 R {tag} 对应的 {len(list(pkg_dir.glob('*.zip')))} 个依赖包")
+        self.say(f"使用 R {tag} 对应的 {len(list(pkg_dir.glob('*.zip')))} 个依赖包（离线包）")
         code, out = self.run([str(self.rscript), "--vanilla", str(script)], timeout=3600)
         self._log_tail(out)
         if code != 0:
@@ -718,6 +982,200 @@ if (!ok) stop("关键依赖安装后仍不可用")
             return False
         self.say("R 依赖包安装完成")
         return True
+
+    # -- online route: pinned versions from a mirror ---------------------
+    @staticmethod
+    def _package_urls(mirror: tuple[str, str, str | None], pinned: PinnedSet,
+                      pkg: PinnedPackage) -> list[str]:
+        """Candidate URLs for one package: CRAN first, then Bioconductor."""
+        _, cran, bioc = mirror
+        urls = [f"{cran}bin/windows/contrib/{pinned.r_tag}/{pkg.filename}"]
+        if bioc:
+            urls.append(f"{bioc}packages/{pinned.bioconductor}/bioc/bin/windows/"
+                        f"contrib/{pinned.r_tag}/{pkg.filename}")
+        return urls
+
+    @staticmethod
+    def _r_installer_url(mirror: tuple[str, str, str | None], pinned: PinnedSet) -> str:
+        return f"{mirror[1]}bin/windows/base/{pinned.r_installer_name}"
+
+    def _mirrors(self, pinned: PinnedSet) -> list[tuple[str, str, str | None]]:
+        """Mirrors ordered fastest-first, measured once per run.
+
+        The probe fetches the mirror's package index (`PACKAGES.gz`): it is small
+        and always present, unlike any individual package (a probe based on a
+        specific package fails as soon as that version is archived).
+        """
+        cached = getattr(self, "_mirror_order", None)
+        if cached is not None:
+            return cached
+        self.say(f"正在测试 {len(MIRRORS)} 个镜像的下载速度…")
+        results: list[tuple[str, float | None]] = []
+        lock = threading.Lock()
+
+        def probe_one(mirror: tuple[str, str, str | None]) -> None:
+            url = f"{mirror[1]}bin/windows/contrib/{pinned.r_tag}/PACKAGES.gz"
+            speed: float | None = None
+            for attempt in range(2):
+                try:
+                    t0 = time.time()
+                    data = bytes(http_get(url, timeout=20))
+                    elapsed = max(time.time() - t0, 1e-6)
+                    if len(data) > 1024:
+                        speed = len(data) / elapsed
+                        break
+                except Exception:  # noqa: BLE001 - unreachable mirror, try the next
+                    speed = None
+            with lock:
+                results.append((mirror[0], speed))
+
+        threads = [threading.Thread(target=probe_one, args=(m,), daemon=True) for m in MIRRORS]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=50)
+
+        order = rank_mirrors(results)
+        by_label = {m[0]: m for m in MIRRORS}
+        for label, speed in sorted(results, key=lambda r: -(r[1] or 0)):
+            self.say(f"    {label:<22} " +
+                     (f"{speed / 1e6:.2f} MB/s" if speed else "不可用"))
+        ordered = [by_label[label] for label in order]
+        self.say(f"选用镜像：{ordered[0][0]}")
+        self._mirror_order = ordered
+        return ordered
+
+    def _fetch_one_package(self, pinned: PinnedSet, pkg: PinnedPackage,
+                           mirrors: list[tuple[str, str, str | None]],
+                           target: Path) -> bool:
+        """Download one pinned package; accept only the pinned *version*.
+
+        A mirror may re-build a binary (same version, different bytes), so the
+        version read out of the zip's DESCRIPTION decides acceptance; a matching
+        sha256 is recorded as "identical to the offline copy".
+        """
+        for mirror in mirrors:
+            for url in self._package_urls(mirror, pinned, pkg):
+                for attempt in range(2):
+                    try:
+                        http_get(url, timeout=240, dest=target)
+                    except Exception:  # noqa: BLE001 - try the next candidate
+                        target.unlink(missing_ok=True)
+                        continue
+                    identity = zip_package_identity(target)
+                    if identity == (pkg.name, pkg.version):
+                        exact = sha256_file(target) == pkg.sha256
+                        self._exact_matches = getattr(self, "_exact_matches", 0) + (1 if exact else 0)
+                        self._rebuilt = getattr(self, "_rebuilt", 0) + (0 if exact else 1)
+                        return True
+                    target.unlink(missing_ok=True)
+                    if identity is not None:
+                        # Same mirror will not change its mind; next mirror.
+                        break
+        return False
+
+    def _download_pinned(self, pinned: PinnedSet,
+                         mirrors: list[tuple[str, str, str | None]],
+                         dest: Path) -> list[Path] | None:
+        """Fetch every pinned package, in dependency order."""
+        order = pinned.order()
+        total = sum(p.size for p in order)
+        self.say(f"开始下载 {len(order)} 个依赖包（固定版本，共约 {total / 1e6:.0f} MB）…")
+        files: list[Path] = []
+        got = 0
+        for index, pkg in enumerate(order, start=1):
+            if self.cancelled.is_set():
+                return None
+            target = dest / pkg.filename
+            if target.is_file() and zip_package_identity(target) == (pkg.name, pkg.version):
+                files.append(target)
+                got += pkg.size
+                continue
+            if not self._fetch_one_package(pinned, pkg, mirrors, target):
+                self.say(f"下载失败：{pkg.name} {pkg.version} —— 已试过所有镜像，"
+                         f"拿不到这个版本（镜像上可能已更新）")
+                self.say("如果反复失败，请改下载离线依赖包（nanoamp-0.1.0-windows-offline-deps.zip），"
+                         "里面有这一套完全相同的版本。")
+                return None
+            files.append(target)
+            got += pkg.size
+            if index % 10 == 0 or index == len(order) or pkg.size > 5_000_000:
+                self.say(f"    [{index}/{len(order)}] {pkg.name} {pkg.version}"
+                         f"（{got / 1e6:.0f}/{total / 1e6:.0f} MB）")
+        exact = getattr(self, "_exact_matches", 0)
+        rebuilt = getattr(self, "_rebuilt", 0)
+        self.say(f"下载完成：{len(files)} 个包，版本全部与固定清单一致"
+                 f"（其中 {exact} 个与离线包逐字节相同，{rebuilt} 个是镜像重新编译的同版本文件）")
+        return files
+
+    def _install_deps_online(self, tag: str) -> bool:
+        pinned = self.ctx.pinned
+        if pinned is None:
+            tags = self.ctx.available_r_tags()
+            self.say(f"安装包内没有适配 R {tag} 的依赖包，也没有可用的固定版本清单。")
+            if tags:
+                self.say(f"安装包提供的是：{', '.join(tags)}")
+            return False
+        if pinned.r_tag != tag:
+            self.say(f"清单里的依赖包是给 R {pinned.r_tag} 编译的，当前 R 是 {tag}，无法混用。")
+            return False
+
+        mirrors = self._mirrors(pinned)
+        dest = Path(tempfile.mkdtemp(prefix="nanoamp-deps-"))
+        try:
+            files = self._download_pinned(pinned, mirrors, dest)
+            if files is None:
+                return False
+            lib = str(self.lib).replace("\\", "/")
+            listing = ",\n  ".join(
+                repr(str(p).replace(chr(92), "/")) for p in files)
+            script = self._write_temp_r("install_deps_online", f"""
+.libPaths(c({lib!r}, .libPaths()))
+files <- c(
+  {listing}
+)
+utils::install.packages(files, lib = {lib!r}, repos = NULL, type = "win.binary")
+need <- c("Biostrings", "IRanges", "Rsamtools", "ShortRead", "data.table",
+          "jsonlite", "optparse", "readxl", "DECIPHER")
+ok <- all(vapply(need, function(p) requireNamespace(p, quietly = TRUE), logical(1)))
+cat("关键依赖检查:", ok, "\\n")
+if (!ok) stop("关键依赖安装后仍不可用")
+""")
+            self.say(f"安装 {len(files)} 个依赖包到 {self.lib} …")
+            code, out = self.run([str(self.rscript), "--vanilla", str(script)], timeout=3600)
+            self._log_tail(out)
+            if code != 0:
+                self.say(f"R 依赖安装失败（代码 {code}）")
+                return False
+            self.say("R 依赖包安装完成（联网下载，版本与离线包一致）")
+            return True
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+
+    def _download_r_installer(self) -> Path | None:
+        """Fetch the pinned R installer when `_offline/` is not present."""
+        pinned = self.ctx.pinned
+        if pinned is None or not pinned.r_installer_sha256:
+            return None
+        dest_dir = Path(tempfile.mkdtemp(prefix="nanoamp-r-"))
+        dest = dest_dir / pinned.r_installer_name
+        for mirror in self._mirrors(pinned):
+            url = self._r_installer_url(mirror, pinned)
+            self.say(f"正在从 {mirror[0]} 下载 R 安装器"
+                     f"（{pinned.r_installer_size / 1e6:.0f} MB，约需 1-3 分钟）…")
+            try:
+                http_get(url, timeout=1800, dest=dest)
+            except Exception as exc:  # noqa: BLE001 - try the next mirror
+                self.say(f"    失败：{exc}")
+                dest.unlink(missing_ok=True)
+                continue
+            if dest.is_file() and sha256_file(dest) == pinned.r_installer_sha256:
+                self.say(f"    R 安装器已下载并通过校验")
+                return dest
+            self.say("    下载内容校验不通过，换镜像重试")
+            dest.unlink(missing_ok=True)
+        self.say("所有镜像都没能取到 R 安装器。")
+        return None
 
     def _install_package(self) -> bool:
         assert self.rscript is not None
@@ -786,12 +1244,17 @@ quit(save = "no", status = status, runLast = FALSE)
         else:
             self.say(f"{self.ctx.bin} 已在 PATH 中")
 
-        # Copy the bundled aligner next to the config so the R package finds it.
-        mm = self.ctx.offline / "minimap2.exe"
-        if mm.is_file():
+        # Copy the aligner next to the config so the R package finds it. The
+        # offline asset has it under _offline/, the setup asset under bin/;
+        # either way it ends up in <install>/bin/minimap2.exe.
+        mm = self.ctx.minimap2_exe
+        if mm is not None:
             target = self.ctx.bin / "minimap2.exe"
+            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(mm, target)
             self.say(f"已安装比对程序 minimap2 -> {target}")
+        else:
+            self.say("警告：安装包内没有 minimap2.exe，比对步骤将无法运行。")
         return True
 
     def _configure_gui(self) -> bool:

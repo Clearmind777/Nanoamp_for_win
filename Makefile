@@ -73,6 +73,7 @@ release-test:
 	python release/_installer/test_install_path_validation.py
 	python release/_installer/test_r_shortcut_cleanup.py
 	python release/_installer/test_r_version_choice.py
+	python release/_installer/test_pinned_deps.py
 
 release-check:
 	release/install.exe --check

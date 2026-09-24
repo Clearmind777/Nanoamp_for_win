@@ -94,6 +94,29 @@ if mm_rel.is_file() and mm_repo.is_file():
     same = sha256(mm_rel) == sha256(mm_repo)
     check(same, "与仓库内 minimap2.exe 一致", "" if same else "hash 不同")
 
+print("\n=== 5b) setup 资产里也带 minimap2（不装离线包时的比对程序） ===")
+# The assets are git-ignored build products, so only check the one that exists.
+import zipfile  # noqa: E402
+
+setup_zips = sorted(RELEASE.glob("nanoamp-*-windows-setup.zip"))
+if not setup_zips:
+    print("   skip  (尚未运行 release/build_assets.py 生成 setup 资产)")
+else:
+    setup = setup_zips[-1]
+    with zipfile.ZipFile(setup) as zf:
+        names = zf.namelist()
+        entry = f"nanoamp-windows/bin/minimap2.exe"
+        check(entry in names, f"{setup.name} 含 {entry}")
+        if entry in names and mm_repo.is_file():
+            with zf.open(entry) as fh:
+                want = sha256(mm_repo)
+                got = hashlib.sha256(fh.read()).hexdigest()
+            check(got == want, "  与仓库内 minimap2.exe 内容一致",
+                  "" if got == want else f"{got[:16]} vs {want[:16]}")
+    deps_entry = "nanoamp-windows/deps/pinned-R4.6.tsv"
+    with zipfile.ZipFile(setup) as zf:
+        check(deps_entry in zf.namelist(), f"{setup.name} 含 {deps_entry}（联网用的固定版本清单）")
+
 print("\n=== 6) install.exe / uninstall.exe 与源码 ===")
 check((RELEASE / "install.exe").is_file(), "install.exe 存在")
 check((RELEASE / "uninstall.exe").is_file(), "uninstall.exe 存在")
