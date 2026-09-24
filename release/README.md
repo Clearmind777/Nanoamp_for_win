@@ -289,7 +289,8 @@ python release\_installer\build_exe.py
 python release\_installer\test_installer_logic.py
 python release\_installer\test_release_layout.py
 python release\_installer\test_window_fit.py         # 窗口不会被内容挤出边界
-python release\_installer\test_locked_file_retry.py  # 文件被占用时重试并报错
+python release\_installer\test_locked_file_retry.py  # 卸载时文件被占用会重试并报错
+python release\_installer\test_copy_retry.py         # 安装时目标文件被占用会重试后报错
 python release\_installer\test_r_version_choice.py   # 系统 R 与随包 R 的选择规则
 python release\_installer\test_pinned_deps.py        # 固定版本清单、选源、minimap2 来源
 ```

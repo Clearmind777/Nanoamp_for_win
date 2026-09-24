@@ -81,6 +81,7 @@ release-test:
 	python release/_installer/test_r_shortcut_cleanup.py
 	python release/_installer/test_r_version_choice.py
 	python release/_installer/test_pinned_deps.py
+	python release/_installer/test_copy_retry.py
 
 release-check:
 	release/install.exe --check

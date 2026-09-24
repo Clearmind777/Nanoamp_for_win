@@ -425,6 +425,38 @@ def http_get(url: str, timeout: float = 60, dest: Path | None = None) -> bytes:
     return b""
 
 
+# A freshly written .exe stays locked for a moment while an antivirus scans it,
+# and a nanoamp.exe that is still running holds its own file. Both make the copy
+# fail with WinError 32 ("another program is using this file"), so retry with a
+# growing delay instead of failing the whole install on the first attempt --
+# same approach as the uninstaller's REMOVE_RETRY_DELAYS.
+COPY_RETRY_DELAYS = (0.0, 0.5, 1.0, 2.0, 4.0)
+
+
+def copy_with_retry(src: Path, dst: Path, say=None) -> Path:
+    """Copy *src* to *dst*, retrying while Windows keeps either file locked."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    last: Exception | None = None
+    for attempt, delay in enumerate(COPY_RETRY_DELAYS, start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            shutil.copy2(src, dst)
+            if attempt > 1 and say is not None:
+                say(f"  第 {attempt} 次尝试复制成功 -> {dst}")
+            return dst
+        except OSError as exc:
+            last = exc
+            if say is not None:
+                say(f"  第 {attempt}/{len(COPY_RETRY_DELAYS)} 次复制未完成（文件被占用）："
+                    f"{dst.name}")
+    raise OSError(
+        f"复制失败：{src} -> {dst}\n"
+        f"重试 {len(COPY_RETRY_DELAYS)} 次后文件仍被占用（{last}）。\n"
+        "请关闭正在运行的 nanoamp 窗口（或暂停安全软件的实时扫描）后重新安装。"
+    )
+
+
 # --------------------------------------------------------------------------
 # the install steps
 # --------------------------------------------------------------------------
@@ -1223,7 +1255,7 @@ quit(save = "no", status = status, runLast = FALSE)
         cmd_path = self.ctx.bin / "nanoamp.cmd"
         launcher = self.ctx.cli_launcher
         if launcher is not None and launcher.is_file():
-            shutil.copy2(launcher, cmd_path)
+            copy_with_retry(launcher, cmd_path, self.say)
             self.say(f"已安装命令行启动器 -> {cmd_path}")
         else:
             # Fallback: a minimal wrapper, in case the release tree is partial.
@@ -1250,8 +1282,7 @@ quit(save = "no", status = status, runLast = FALSE)
         mm = self.ctx.minimap2_exe
         if mm is not None:
             target = self.ctx.bin / "minimap2.exe"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(mm, target)
+            copy_with_retry(mm, target, self.say)
             self.say(f"已安装比对程序 minimap2 -> {target}")
         else:
             self.say("警告：安装包内没有 minimap2.exe，比对步骤将无法运行。")
@@ -1265,7 +1296,7 @@ quit(save = "no", status = status, runLast = FALSE)
         target_dir = self.ctx.app
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "nanoamp.exe"
-        shutil.copy2(gui, target)
+        copy_with_retry(gui, target, self.say)
         self.say(f"已安装图形界面 -> {target}")
 
         if not self.ctx.make_shortcut:
