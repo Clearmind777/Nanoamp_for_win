@@ -70,14 +70,28 @@ python release\build_assets.py --compare-published <下载的 setup.zip> <下载
 
 ## 上传
 
-```powershell
-gh release create v0.1.3 `
-  release\nanoamp-0.1.3-windows-setup.zip `
-  release\nanoamp-0.1.0-windows-offline-deps.zip `
-  --title "nanoamp 0.1.3 — Windows 版" --notes-file <说明.md>
+**v0.1.3 已经发布**：
+
+```text
+release : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
+tag     : v0.1.3（annotated，指向 a00c83c）
+asset   : nanoamp-0.1.3-windows-setup.zip   33,198,534 B
+          sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
 ```
 
-或在 GitHub 网页上对某个 tag 上传这两个文件。名字不要改：使用者按
+只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已经作为 **v0.1.2** 的附件
+发布（sha256 `16035340…`），0.1.3 的发布说明直接链接到它 —— 这样每次发版只传约 32 MB。
+**因此不要删除 v0.1.2 的 Release**，否则那个链接会失效。
+
+下次发版：先更新 `build_assets.py` 里的 `SETUP_VERSION` 与文件名，重建资产，然后
+
+```powershell
+gh release create v0.1.4 `
+  release\nanoamp-0.1.4-windows-setup.zip `
+  --title "nanoamp 0.1.4 — Windows 版" --notes-file <说明.md>
+```
+
+或在 GitHub 网页上建 tag + 上传。名字不要改：使用者按
 `nanoamp-<版本>-windows-setup.zip` 找安装包，`nanoamp-0.1.0-windows-offline-deps.zip`
 的版本号保持 0.1.0（离线依赖本身没有变化）。
 

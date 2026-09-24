@@ -115,17 +115,39 @@ PASS  R version choice: matching system R is used, mismatching R falls back to t
 1. 先从包里运行 `_offline\r\R-4.6.1-win.exe`（或在 R 官网装 R 4.6.x，
    `%ProgramFiles%\R\R-4.6.1` / `D:\tools\R\R-4.6.1` 都在安装器的搜索路径里），
    再重新运行 `install.exe` —— 它检测到 4.6 就会直接用；
-2. 或等 0.1.3 的安装包（本修复已进仓库与资产）。
+2. 或换 0.1.3 的安装包（本修复已进仓库并已发布，见 §7）。
 
 ---
 
-## 6. 遗留
+## 6. 发布 v0.1.3
 
-1. **远端 Release 仍是 v0.1.2**（2026-09-20 发布）：它既没有本轮的 R 版本修复，
-   也没有 work_report.12 的 `align.R` 空格路径修复。仓库里 0.1.3 的两个资产已就绪
-   （`release/SHA256SUMS.txt`），**尚未上传**，等待确认后再发。
+```text
+release : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
+tag     : v0.1.3（annotated，指向 a00c83c）
+asset   : nanoamp-0.1.3-windows-setup.zip   33,198,534 B
+          sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
+```
+
+上传后 GitHub 自报的 `digest` 与本地 sha256 一致（不是只看"上传成功"这几个字），
+发布说明 181 行，包含两个修复的说明、两步安装、三种用法、校验值与已知限制。
+
+**离线依赖包这次没有重新上传。** 它的内容自 0.1.0 起没有变化，已经作为 **v0.1.2**
+的附件发布（sha256 `16035340…`，248.2 MB），0.1.3 的说明里直接给出那个下载链接 ——
+这样本次只传 32 MB 而不是再传 236 MB。也正因为说明要引用它，**v0.1.2 的 Release
+特意保留没有删除**（0.1.2 本身对"已有 R 4.6"或"完全没有 R"的机器仍可用）。
+
+发布方式：用 Git Credential Manager 已缓存的凭据（`git credential fill` 取出，
+作用域 `repo`，只在内存里用）走 REST API —— 建 tag（`git push`）、建 release、
+上传附件；脚本 `tmp/publish_release.py` 可重复执行（已存在则跳过）。
+
+---
+
+## 7. 遗留
+
+1. **v0.1.3 已发布**（见 §6）；v0.1.2 保留（它的离线依赖附件被 0.1.3 的说明引用）。
 2. 干净机器上"没有系统 R → 装自带 R"这一分支仍未在真机实测（本机有 R 4.6，
-   走的是"检测到已安装的 R"）；不过包内 R 安装器的调用参数、安装目录、
-   快捷方式抑制逻辑与本次沙箱安装共用同一条路径。
+   走的是"检测到已安装的 R"）；不过"系统 R 版本不匹配就改用自带 R"的决策与切换已被
+   `test_r_version_choice.py` 锁住，包内 R 安装器的调用参数、安装目录、快捷方式抑制
+   逻辑也与本次沙箱安装共用同一条路径。
 3. `install.spec` / `uninstall.spec` 的 `onefile=False` 与实际 onefile 产物不一致，
    继续记录未改（work_report.12 §8）。
