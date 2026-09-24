@@ -24,13 +24,18 @@ as `_offline/minimap2.exe`, included in the setup asset so an online-only
 install still ends up with a working aligner.
 
 Usage:
-    python release/build_assets.py                 # build both zips here
-    python release/build_assets.py --verify-only   # check what is present
-    python release/build_assets.py --compare-published <setup.zip> <deps.zip>
+    python release/_build/build_assets.py                 # build both zips here
+    python release/_build/build_assets.py --verify-only    # check what is present
+    python release/_build/build_assets.py --compare-published <setup.zip> <deps.zip>
 
-The zips are ~31 MB and ~248 MB: GitHub refuses files over 100 MiB, so they are
+The zips are ~34 MB and ~248 MB: GitHub refuses files over 100 MiB, so they are
 NOT committed (.gitignore). What is committed next to this script is
 SHA256SUMS.txt, so a published asset can always be traced back to a revision.
+
+This script lives in `release/_build/`, apart from the payload it packs:
+`release/` itself holds nothing but the files a user unpacks (`install.exe`,
+`01_R-package/`, `_offline/` ...), the installer sources (`_installer/`) and
+this build folder.
 """
 
 from __future__ import annotations
@@ -42,7 +47,10 @@ import sys
 import zipfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+# OUT: where the zips and SHA256SUMS.txt are written  (release/_build/)
+# TREE: the payload they are built from               (release/)
+OUT = Path(__file__).resolve().parent
+TREE = OUT.parent
 ROOT = "nanoamp-windows"
 
 SETUP_VERSION = "0.1.5"
@@ -89,24 +97,24 @@ def iter_files(items: list[str], extra: list[tuple[str, str]] = ()):
     """Yield (source path, archive path) for every file under *items*.
 
     *extra* adds files that are stored under a different name in the archive:
-    each entry is (path relative to this directory, archive path relative to the
+    each entry is (path relative to release/, archive path relative to the
     asset root).
     """
     for item in items:
-        path = HERE / item
+        path = TREE / item
         if path.is_dir():
             for dirpath, dirnames, filenames in os.walk(path):
                 dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
                 for name in sorted(filenames):
                     full = Path(dirpath) / name
-                    rel = full.relative_to(HERE).as_posix()
+                    rel = full.relative_to(TREE).as_posix()
                     yield full, f"{ROOT}/{rel}"
         elif path.is_file():
             yield path, f"{ROOT}/{item}"
         else:
             raise SystemExit(f"missing: {path}")
     for src_rel, arc_rel in extra:
-        src = HERE / src_rel
+        src = TREE / src_rel
         if not src.is_file():
             raise SystemExit(f"missing: {src}")
         yield src, f"{ROOT}/{arc_rel}"
@@ -182,26 +190,28 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.compare_published:
-        rc = compare_published(HERE / SETUP_ZIP, Path(args.compare_published[0]))
-        rc |= compare_published(HERE / OFFLINE_ZIP, Path(args.compare_published[1]))
+        rc = compare_published(OUT / SETUP_ZIP, Path(args.compare_published[0]))
+        rc |= compare_published(OUT / OFFLINE_ZIP, Path(args.compare_published[1]))
         return rc
 
     if not args.verify_only:
         for name, items, extra in ASSETS:
-            target = HERE / name
+            target = OUT / name
             n, total = make_zip(target, items, extra)
-            print(f"built {name}: {n} files, {total / 1e6:.1f} MB uncompressed, "
+            print(f"built {target.relative_to(TREE).as_posix()}: {n} files, "
+                  f"{total / 1e6:.1f} MB uncompressed, "
                   f"{target.stat().st_size / 1e6:.1f} MB packed")
 
     lines = []
     for name, items, extra in ASSETS:
-        target = HERE / name
+        target = OUT / name
         if not target.is_file():
             raise SystemExit(f"missing {target}; run without --verify-only first")
         verify_zip(target, items, extra)
         lines.append(f"{sha256(target)}  {name}")
-    (HERE / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="ascii")
-    print("wrote SHA256SUMS.txt")
+    sums = OUT / "SHA256SUMS.txt"
+    sums.write_text("\n".join(lines) + "\n", encoding="ascii")
+    print(f"wrote {sums.relative_to(TREE).as_posix()}")
     for line in lines:
         print("  ", line)
     return 0

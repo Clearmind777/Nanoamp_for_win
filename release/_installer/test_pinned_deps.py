@@ -152,9 +152,11 @@ finally:
 check(not (RELEASE / "bin").exists(),
       "the tree keeps only one copy of the aligner (build_assets.py renames "
       "_offline/minimap2.exe to bin/minimap2.exe inside the asset)")
-sys.path.insert(0, str(RELEASE))
+sys.path.insert(0, str(RELEASE / "_build"))
 import build_assets as ba  # noqa: E402
 
+check(ba.TREE == RELEASE and ba.OUT == RELEASE / "_build",
+      "the build script packs release/ and writes into release/_build/")
 check(("_offline/minimap2.exe", "bin/minimap2.exe") in ba.SETUP_EXTRA,
       "build_assets.py does ship it as bin/minimap2.exe in the setup asset")
 

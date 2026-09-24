@@ -98,9 +98,10 @@ print("\n=== 5b) setup 资产里也带 minimap2（不装离线包时的比对程
 # The assets are git-ignored build products, so only check the one that exists.
 import zipfile  # noqa: E402
 
-setup_zips = sorted(RELEASE.glob("nanoamp-*-windows-setup.zip"))
+BUILD = RELEASE / "_build"
+setup_zips = sorted(BUILD.glob("nanoamp-*-windows-setup.zip"))
 if not setup_zips:
-    print("   skip  (尚未运行 release/build_assets.py 生成 setup 资产)")
+    print("   skip  (尚未运行 release/_build/build_assets.py 生成 setup 资产)")
 else:
     setup = setup_zips[-1]
     with zipfile.ZipFile(setup) as zf:

@@ -14,6 +14,10 @@ nanoamp_diagnose.txt
 # This directory is the deliverable that gets handed to a user, so it must
 # work from a plain clone/USB copy with no network. See README.md for the
 # size breakdown and the reasoning.
+#
+# _build/ is the packaging workspace: only SHA256SUMS.txt, README.md and
+# build_assets.py are tracked there; the zips it produces are ignored
+# (root .gitignore: release/_build/*.zip).
 
 # The root .gitignore excludes nanoamp_*.tar.gz (R CMD build leftovers).
 # The copy under 01_R-package/ is a release artifact and must be kept.

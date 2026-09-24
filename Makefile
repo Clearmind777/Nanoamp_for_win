@@ -1,6 +1,6 @@
 R_PKG := 02_code/r
 
-.PHONY: help install test check cli gui gui-python gui-exe gui-test release install-exe release-check release-test deps toolchain offline-bundle offline-install clean-builds
+.PHONY: help install test check cli gui gui-python gui-exe gui-test release install-exe release-check release-test release-assets deps toolchain offline-bundle offline-install clean-builds clean-scratch
 
 help:
 	@echo "nanoamp (Windows variant) project targets:"
@@ -14,12 +14,14 @@ help:
 	@echo "  make gui-test         Run the Python GUI self-tests"
 	@echo "  make release          Rebuild the whole release/ tree payload"
 	@echo "  make install-exe      Rebuild release/install.exe and uninstall.exe"
+	@echo "  make release-assets   Repack the publishable zips into release/_build/"
 	@echo "  make release-test     Verify the release layout and installer logic"
 	@echo "  make deps             Show how the bundled minimap2.exe was built"
 	@echo "  make toolchain        Install the MSYS2/MINGW-w64 build toolchain"
 	@echo "  make offline-bundle   Fetch the offline installer bundle into 03_dependence/offline-bundle/"
 	@echo "  make offline-install  Install everything from the bundle (no network)"
 	@echo "  make clean-builds     Remove 04_builds/r contents"
+	@echo "  make clean-scratch    Remove build scratch (__pycache__, PyInstaller work dirs)"
 
 install:
 	R CMD INSTALL $(R_PKG)
@@ -65,6 +67,11 @@ release:
 install-exe:
 	python release/_installer/build_exe.py
 
+# Repack the two publishable zips (release/_build/*.zip) and rewrite
+# release/_build/SHA256SUMS.txt. Both are git-ignored build products.
+release-assets:
+	python release/_build/build_assets.py
+
 release-test:
 	python release/_installer/test_installer_logic.py
 	python release/_installer/test_release_layout.py
@@ -99,3 +106,8 @@ offline-install:
 
 clean-builds:
 	rm -rf 04_builds/r/*
+
+# Generated scratch that must never reach an asset (build_assets.py skips those
+# directories too, this just keeps the working tree tidy).
+clean-scratch:
+	rm -rf release/_installer/build release/__pycache__ release/_installer/__pycache__ release/_build/__pycache__

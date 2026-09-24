@@ -9,7 +9,7 @@ of whatever a mirror serves today -- and can verify every download by sha256.
 
 Run it after refreshing `release/_offline` (see
 `03_dependence/offline-bundle/fetch_offline_bundle.R`), then rebuild the assets
-with `python release/build_assets.py`.
+with `python release/_build/build_assets.py`.
 """
 
 from __future__ import annotations

@@ -44,9 +44,8 @@ tmp/test_results/*
 *.Rcheck/
 nanoamp_*.tar.gz
 
-# ---- Release 资产压缩包 ----
-# 由 release/build_assets.py 生成，可发布到 GitHub Release；
+# ---- Release 资产压缩包（release/_build/ 是打包工作区）----
+# 由 release/_build/build_assets.py 生成，可发布到 GitHub Release；
 # 248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 限制，因此不进 Git，
-# 只提交 release/SHA256SUMS.txt 以便对账。
-release/nanoamp-*-windows-setup.zip
-release/nanoamp-*-windows-offline-deps.zip
+# 只提交 release/_build/SHA256SUMS.txt 以便对账。
+release/_build/*.zip

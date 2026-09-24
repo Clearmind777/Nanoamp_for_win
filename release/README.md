@@ -2,25 +2,30 @@
 
 这个目录里**两个 zip 就是可以直接上传到 GitHub Release 的资产**，其余是它们的源材料。
 
-## 要发布的两个资产
+## 目录结构
+
+根目录只放"使用者解压后要看到的东西"和安装器源码；打包相关的东西都在
+`_build/` 里（详见 `_build/README.md`）：
 
 ```text
 release/
-|-- nanoamp-0.1.5-windows-setup.zip          ← 上传这个（约 34 MB，**单独也能装**）
-|-- nanoamp-0.1.0-windows-offline-deps.zip   ← 可选：装上就不用联网下载依赖（约 248 MB）
-|-- SHA256SUMS.txt      ← 两个 zip 的 sha256，随仓库提交，便于对账
-|-- build_assets.py     ← 重新生成上面两个 zip（内容逐条自校验）
-|-- deps/               ← 固定版本依赖清单 + 生成脚本（进 setup zip）
-|
-|-- install.exe          ← setup zip 的源材料（约 12 MB）
-|-- uninstall.exe        ← setup zip 的源材料
+|-- install.exe           ← 使用者双击这个（约 12 MB）
+|-- uninstall.exe         ← 卸载器
+|-- README.md             ← 使用者看到的说明
 |-- 01_R-package/         R 包版：给要写 R 代码的同学
 |-- 02_CLI/               命令行版：给要批量处理样本的同学
 |-- 03_GUI/               图形界面版：给不写代码的人（最常用）
-|-- _installer/           安装器源码（开发者用，使用者可忽略）
-|-- diagnose_install_env.* 装不上时用来采环境信息
-`-- _offline/             offline-deps zip 的源材料：R 安装器 + 109 个 R 包 + minimap2
+|-- deps/                 固定版本依赖清单（联网安装用；进 setup zip）
+|-- _offline/             离线依赖源材料：R 安装器 + 109 个 R 包 + minimap2
+|-- _installer/           安装器/卸载器源码与自测（开发者用；含 diagnose_install_env.*）
+`-- _build/               打包工作区（开发者用；zip 在这里生成，不进 Git）
+    |-- build_assets.py       重新生成两个 zip（内容逐条自校验）
+    |-- SHA256SUMS.txt        产物的 sha256，随仓库提交，便于对账
+    |-- nanoamp-0.1.5-windows-setup.zip          ← 上传这个（约 34 MB，**单独也能装**）
+    `-- nanoamp-0.1.0-windows-offline-deps.zip   ← 可选：装上就不用联网下载依赖（约 248 MB）
 ```
+
+> 装不上要采环境信息时用 `release/_installer/diagnose_install_env.bat`（或同名 `.py`）。
 
 内部结构**共用一个根目录** `nanoamp-windows/`：
 
@@ -55,7 +60,8 @@ nanoamp-windows/            ← 解压到同一个地方（两个 zip 会自动�
 `_offline/minimap2.exe` 是同一个文件，两个资产谁先解压都不会冲突。
 
 > **248 MB 的离线依赖包超过 GitHub 单文件 100 MiB 的硬限制，因此 zip 不进 Git**
-> （`.gitignore` 已排除）；仓库里只提交 `SHA256SUMS.txt` 与 `deps/pinned-*.tsv`。
+> （`.gitignore` 已排除 `release/_build/*.zip`）；仓库里只提交
+> `_build/SHA256SUMS.txt` 与 `deps/pinned-*.tsv`。
 
 ## 重新生成资产
 
@@ -74,11 +80,11 @@ python release\_installer\build_exe.py
 # 4. 固定版本依赖清单（离线包换了内容时才需要；平时已提交在 release/deps/）
 python release\deps\build_pinned_manifest.py
 
-# 5. 打包成两个资产 zip，并重写 SHA256SUMS.txt
-python release\build_assets.py
+# 5. 打包成两个资产 zip（写进 release\_build\），并重写 _build\SHA256SUMS.txt
+python release\_build\build_assets.py
 
 # 6. 只校验（不重建）：解压后每条内容与源材料逐字节比对
-python release\build_assets.py --verify-only
+python release\_build\build_assets.py --verify-only
 ```
 
 `build_assets.py` 用固定时间戳写 zip，所以同样的源材料给出同样的字节；
@@ -87,7 +93,9 @@ python release\build_assets.py --verify-only
 ### 与本仓库已发布资产对账
 
 ```powershell
-python release\build_assets.py --compare-published <下载的 setup.zip> <下载的 offline-deps.zip>
+# 先下载已发布的资产（例如 v0.1.3）
+gh release download v0.1.3 -D tmp\published
+python release\_build\build_assets.py --compare-published tmp\published\<setup.zip> tmp\published\<offline-deps.zip>
 ```
 
 会列出条目差异与 CRC 不一致的文件（离线依赖包 113 个文件里 112 个与 v0.1.2 的
@@ -104,11 +112,11 @@ python release\build_assets.py --compare-published <下载的 setup.zip> <下载
           asset nanoamp-0.1.3-windows-setup.zip  33,198,534 B
                  sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
 
-未发布  : release/nanoamp-0.1.5-windows-setup.zip
+未发布  : release/_build/nanoamp-0.1.5-windows-setup.zip
           0.1.4 增加了"没有离线包也能联网安装（固定版本、自动选源）"
           0.1.5 补上 bin/minimap2.exe（联网装的机器也有比对程序）
                     + GUI 直接按 <安装目录>\bin\minimap2.exe 定位比对程序
-          sha256 见 release/SHA256SUMS.txt
+          sha256 见 release/_build/SHA256SUMS.txt
 ```
 
 v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已经作为
@@ -116,11 +124,11 @@ v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起�
 **因此不要删除 v0.1.2 的 Release**，否则那个链接会失效。
 从 0.1.4 起 setup 包单独也能装完（联网下载固定版本的依赖），离线包只是"更快更稳"的选项。
 
-下次发版：先更新 `build_assets.py` 里的 `SETUP_VERSION` 与文件名，重建资产，然后
+下次发版：先更新 `_build/build_assets.py` 里的 `SETUP_VERSION` 与文件名，重建资产，然后
 
 ```powershell
 gh release create v0.1.5 `
-  release\nanoamp-0.1.5-windows-setup.zip `
+  release\_build\nanoamp-0.1.5-windows-setup.zip `
   --title "nanoamp 0.1.5 — Windows 版" --notes-file <说明.md>
 ```
 

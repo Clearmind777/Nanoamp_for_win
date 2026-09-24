@@ -42,12 +42,12 @@ abind    1.4-8    67558  …    …       methods;utils
 
 ```bash
 # 先确保离线包是最新的（03_dependence/offline-bundle/fetch_offline_bundle.R）
-python tmp/make_pinned_manifest.py
+python release/deps/build_pinned_manifest.py
 ```
 
 脚本会读 `_offline/r-packages/bin/windows/contrib/4.6/PACKAGES` 与每个 `.zip`，
 算出大小与摘要后写出本文件；如果清单里的版本与 zip 文件名不一致会直接报错退出。
-改完记得重建资产：`python release/build_assets.py`。
+改完记得重建资产：`python release/_build/build_assets.py`。
 
 ## 镜像列表
 

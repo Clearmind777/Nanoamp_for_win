@@ -96,7 +96,7 @@ def _verify_payload_visible() -> None:
             print(f"  OK      {name}")
         elif name == "_offline":
             print("  note    _offline not present "
-                  "(optional: build_assets.py packages deps/ so install.exe can download)")
+                  "(optional: release/_build/build_assets.py packages deps/ so install.exe can download)")
         else:
             print(f"  MISSING {name}")
             ok = False
