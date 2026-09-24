@@ -30,8 +30,9 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.14.md      # installer: pick an R the bundled packages can actually use
     |-- work_report.15.md      # install without the offline package: pinned versions, mirror
     |                          #   probing, and the minimap2 the online route was missing
-    `-- work_report.16.md      # tidy release/: payload at the root, packaging in _build/
+    |-- work_report.16.md      # tidy release/: payload at the root, packaging in _build/
+    `-- work_report.17.md      # serious tone throughout: UI strings and every README
 ```
 
-Start with `programs_dev_info.md` for the original request and
-`programs_dev_plan_1.md` for the overall design.
+The original request and the requested deliverables are documented in
+`programs_dev_info.md`; the overall design is in `programs_dev_plan_1.md`.

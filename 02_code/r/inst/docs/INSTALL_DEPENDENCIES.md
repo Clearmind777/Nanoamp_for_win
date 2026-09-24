@@ -22,7 +22,7 @@ required because `Rsamtools::asBam()` handles SAM to BAM conversion.
 
 ## 2. minimap2 is already bundled
 
-You normally do not have to install anything: the repository ships a native
+No separate installation is normally required: the repository ships a native
 Windows build of minimap2 2.31 at
 
 ```text
@@ -35,8 +35,8 @@ Windows build of minimap2 2.31 at
 2. `03_dependence\<os>-<arch>\bin\` (`.exe` on Windows);
 3. `PATH`.
 
-Because the bundled binary sits at level 2, it is picked up automatically with
-no PATH changes. It is statically linked against libwinpthread and zlib, so it
+Because the bundled binary is resolved at level 2, it is found automatically
+without PATH changes. It is statically linked against libwinpthread and zlib, so it
 depends only on `KERNEL32.dll` and `msvcrt.dll` and runs on a machine with no
 MSYS2, Cygwin, conda or WSL installed.
 
@@ -53,7 +53,8 @@ nanoamp:::nanoamp_tool_version("minimap2")
 ### Rebuilding it from source
 
 Upstream publishes no official Windows binary, but minimap2 compiles natively
-with the MSYS2 MINGW-w64 toolchain. Two unattended, non-admin steps:
+with the MSYS2 MINGW-w64 toolchain. The following two steps run unattended and
+do not require administrator privileges:
 
 ```powershell
 # 1. portable MSYS2 + MINGW-w64 toolchain (~1.5 GB, outside the repo)
@@ -66,10 +67,10 @@ bash 03_dependence/windows-x86_64/build_minimap2.sh
 Pinned versions, the compiler flags that matter and the resulting hash are in
 `03_dependence/windows-x86_64/README.md`.
 
-### If you cannot use the bundled binary
+### When the bundled binary cannot be used
 
-On Windows on ARM, or if you prefer no external tool at all, use the R-native
-alignment backend:
+On Windows on ARM, or when no external tool is to be used at all, the R-native
+alignment backend is available:
 
 ```r
 run_haplotype_analysis(..., aligner = "r")
@@ -78,16 +79,16 @@ run_haplotype_analysis(..., aligner = "r")
 This is slower than minimap2 and is intended for small and medium amplicons.
 Mode C needs no external tool either.
 
-You can also supply your own build: drop `minimap2.exe` into
+A locally built binary can also be used: place `minimap2.exe` in
 `03_dependence\windows-x86_64\bin\` and nanoamp will resolve it, or point
-`NANOAMP_MINIMAP2` at it. Adding the folder to `PATH` works too, but is not
+`NANOAMP_MINIMAP2` at it. Adding the folder to `PATH` also works but is not
 necessary.
 
 ## 3. samtools
 
 Not needed and not bundled. `Rsamtools::asBam()` converts minimap2's SAM output
-to BAM by default. Set `use_samtools = TRUE` only if you explicitly want the
-samtools path, in which case you must build samtools yourself — htslib
+to BAM by default. Set `use_samtools = TRUE` only when the samtools path is
+explicitly required, in which case samtools must be built locally — htslib
 documents MSYS2/MINGW64 as the recommended Windows build environment.
 
 ## 4. R packages
@@ -151,7 +152,7 @@ What to check:
 - `DECIPHER` may be `FALSE`: Mode B still works with a fallback, but DECIPHER
   is recommended.
 
-## 6. Windows pitfalls
+## 6. Common Windows issues
 
 - **`conda install minimap2 samtools` will not work**: there is no win-64 build
   for these packages, and this project does not use conda anyway.
@@ -160,7 +161,7 @@ What to check:
 - **Spaces or non-ASCII characters in paths**: prefer `C:\tools\...`.
 - **Windows SmartScreen**: allow the downloaded binaries if prompted.
 - **Multiple R installations**: check `Rscript -e 'cat(R.home())'` and make
-  sure the package is installed into the R you actually use.
+  sure the package is installed into the R installation in use.
 
 ## 7. Dependency reduction status
 
@@ -174,4 +175,4 @@ Already implemented:
    and medium datasets, and for Windows on ARM;
 4. `minimap2` remains the recommended backend for large datasets.
 
-Set `use_samtools = TRUE` only if you explicitly need the samtools path.
+Set `use_samtools = TRUE` only when the samtools path is explicitly required.

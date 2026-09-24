@@ -1,6 +1,9 @@
 # 02_code：源代码目录
 
-本目录包含 `nanoamp` R 包、基于 R 的命令行版本，以及 R Shiny GUI。
+本目录包含 `nanoamp` R 包、基于 R 的命令行版本，以及图形界面。
+
+本仓库是项目的 **Windows 变体**；Linux 变体位于姊妹仓库
+`a_09_18_26_mapping_programs_dev_for_linux`。
 
 ```text
 02_code/
@@ -24,8 +27,13 @@
 `-- gui/                    # 仓库级 Shiny GUI 入口与启动器
 ```
 
-Python 版本已经取消，后续开发统一以 R 技术栈为主。
-外部工具统一放在仓库根目录的 `03_dependence/`。
+R 是分析核心；CLI 与图形界面均为外壳，调用 `nanoamp` R 包，不重复实现分析逻辑。
+Python/Tkinter 界面属于同一类外壳。外部工具统一放在仓库根目录的
+`03_dependence/`。
+
+早期版本计划过的 Python CLI 并未实现：命令行开发统一基于 R 包
+（`nanoamp_cli()`）。`PythonGUI/` 中的 Python 代码是桌面图形界面，不是 CLI，
+`release/03_GUI/` 打包的 `nanoamp.exe` 即由它构建。
 
 ## 设计原则
 
@@ -33,7 +41,8 @@ Python 版本已经取消，后续开发统一以 R 技术栈为主。
 2. **共享契约**：参数名、默认值和输出列在 `shared/` 统一定义；
 3. **数据与代码分离**：测试数据在 `01_data/`，运行结果在 `tmp/test_results/<前端>/`；
 4. **GUI 以 Windows 为主要目标**：使用 Shiny，可跨 Windows、Linux、macOS 运行，
-   后续可用 RInno 打包为 Windows 安装包。
+   后续可用 RInno 打包为 Windows 安装包；`PythonGUI/` 中的 Python/Tkinter 界面
+   面向同一 Windows 桌面，改用 PyInstaller 打包。
 5. **优先使用内置工具**：外部工具先从
    `03_dependence/<os>-<arch>/bin/` 解析，其次才是 `PATH`。
 
@@ -74,7 +83,7 @@ library(nanoamp)
 nanoamp_gui()
 ```
 
-Windows 上安装 R 包后，可直接运行：
+Windows 上安装 R 包后，可运行：
 
 ```bat
 Rscript -e "library(nanoamp); nanoamp_gui()"
@@ -89,7 +98,8 @@ GUI 规划、启动脚本和 Windows 打包说明见 `gui/README.md`。
 | R 包 | 已实现，并通过 `R CMD check`（`Status: OK`） |
 | 基于 R 的 CLI | 已实现（`nanoamp_cli()` 和 `02_code/cli`） |
 | R Shiny GUI | 初版已实现（`nanoamp_gui()` 和 `02_code/gui`） |
-| Windows 安装包 | 计划使用 RInno |
+| Python/Tkinter GUI | 已实现，打包为 `02_code/PythonGUI/dist/nanoamp.exe` |
+| Windows 安装包 | 已实现，使用 PyInstaller 构建（`release/_installer/`；产出 `install.exe` 与 `uninstall.exe`） |
 
 外部工具统一放在 `03_dependence/`；平台支持矩阵和 R 内后备方案见
 `03_dependence/README-CN.md`。

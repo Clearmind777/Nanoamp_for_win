@@ -278,8 +278,8 @@ class Uninstaller:
         """True when the user cancelled; tells the GUI and stops the flow."""
         if not self.cancelled.is_set():
             return False
-        self.say("已按用户要求停止。已经删除的内容不会恢复；"
-                 "再次运行本程序可以继续清理剩下的部分。")
+        self.say("已按用户要求停止。已删除的内容不会恢复；"
+                 "再次运行本程序可继续清理剩余部分。")
         self.events.put(("cancelled",))
         return True
 
@@ -313,7 +313,7 @@ class Uninstaller:
                 detail = ("，被占用：" + ", ".join(blocked[:3])) if blocked else ""
                 self.say(f"  第 {attempt}/{len(REMOVE_RETRY_DELAYS)} 次删除未完成：{exc}{detail}")
         self.say(f"删除失败：{last_error}")
-        self.say("提示：请关闭正在运行的 nanoamp 窗口后重新运行本程序，或手工删除该目录。")
+        self.say("提示：请关闭正在运行的 nanoamp 窗口后重新运行本程序，或手动删除该目录。")
         return False
 
     def _stop_running_background_processes(self) -> None:
@@ -569,8 +569,8 @@ class UninstallWindow:
         ttk.Label(head, text="卸载 nanoamp", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(
             head,
-            text="这个程序会删除安装时创建的文件和设置。\n"
-                 "你自己安装的 R 和你的 R 库不会被删除。",
+            text="本程序删除安装时创建的文件与设置。\n"
+                 "用户自行安装的 R 及其 R 库不会被删除。",
             font=("Microsoft YaHei UI", 9), foreground="#444444", justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -620,7 +620,7 @@ class UninstallWindow:
 
         keep = ttk.LabelFrame(self.root, text="不会删除", padding=8)
         keep.pack(fill="x", padx=pad, pady=(8, 0))
-        ttk.Label(keep, text="• 你自己安装的 R\n• 你的 R 库和其中的其他 R 包\n• 你的测序数据和结果文件",
+        ttk.Label(keep, text="• 用户自行安装的 R\n• 用户 R 库及其中的其他 R 包\n• 测序数据与结果文件",
                   font=("Microsoft YaHei UI", 9), justify="left").pack(anchor="w")
 
         self.step_label = ttk.Label(self.root, text="确认后点击「开始卸载」。",
@@ -699,8 +699,8 @@ class UninstallWindow:
             return
         if not messagebox.askyesno(
             APP_TITLE,
-            f"确定要卸载 nanoamp 吗？\n\n安装目录：{self.plan.install_root}\n\n"
-            "这个操作不可撤销。",
+            f"确认卸载 nanoamp？\n\n安装目录：{self.plan.install_root}\n\n"
+            "该操作不可撤销。",
         ):
             return
 
@@ -737,9 +737,9 @@ class UninstallWindow:
         self.step_label.configure(text="已取消。")
         messagebox.showinfo(
             APP_TITLE,
-            "已取消卸载。\n\n"
-            "已经删除的内容不会恢复。想继续清理的话，重新运行本程序即可 ——"
-            "它会重新检测还剩什么。",
+            "卸载已取消。\n\n"
+            "已删除的内容不会恢复。如需继续清理，请重新运行本程序，"
+            "它会重新检测剩余内容。",
         )
 
     def _worker(self) -> None:
@@ -768,7 +768,7 @@ class UninstallWindow:
                 elif kind == "fatal":
                     self.btn.configure(state="normal")
                     self.btn_cancel.configure(state="disabled")
-                    messagebox.showerror(APP_TITLE, f"卸载过程中出现错误。\n\n{ev[1]}")
+                    messagebox.showerror(APP_TITLE, f"卸载过程中发生错误。\n\n{ev[1]}")
         except queue.Empty:
             pass
         self.root.after(120, self._pump)
@@ -782,15 +782,15 @@ class UninstallWindow:
             messagebox.showinfo(
                 APP_TITLE,
                 f"nanoamp 已卸载，释放约 {freed / 1024 / 1024:.0f} MB。\n\n"
-                "桌面快捷方式和 PATH 条目也已清理。\n"
-                "你自己安装的 R 没有被删除。",
+                "桌面快捷方式与 PATH 条目已一并清理。\n"
+                "用户自行安装的 R 未被删除。",
             )
         else:
             self.step_label.configure(text="卸载未完全成功，请查看详情。")
             messagebox.showwarning(
                 APP_TITLE,
-                "有部分内容没能删除。\n\n"
-                "通常是 nanoamp 窗口还开着，或文件被杀毒软件占用。\n"
+                "部分内容未能删除。\n\n"
+                "常见原因为 nanoamp 窗口仍在运行，或文件被安全软件占用。\n"
                 "关闭相关窗口后重新运行本程序即可。",
             )
 

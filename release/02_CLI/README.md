@@ -1,11 +1,11 @@
 # 命令行版（CLI）
 
-给**需要批量处理几十上百个样本**的同学。
+面向**需要批量处理几十上百个样本**的用户。
 
-如果只是偶尔跑一两个样本，用图形界面版更快 —— 见
+如果只是偶尔分析一两个样本，使用图形界面版操作更少 —— 见
 [`../03_GUI/README.md`](../03_GUI/README.md)。
 
-## 里面有什么
+## 目录内容
 
 ```text
 02_CLI/
@@ -20,19 +20,19 @@
 
 ## 安装
 
-**推荐：直接双击 `../install.exe`。** 它会：
+**推荐方式：直接双击 `../install.exe`。** 它会：
 
 1. 把启动器和驱动脚本装到 `%LOCALAPPDATA%\nanoamp\`；
 2. 把 `%LOCALAPPDATA%\nanoamp\bin` 加进**用户 PATH**；
 3. 把 `minimap2.exe` 放到同一个目录并写进驱动脚本。
 
-装完之后**新开一个命令行窗口**（PowerShell 或 cmd 都行），就能用了：
+安装完成后**新开一个命令行窗口**（PowerShell 或 cmd 均可）即可使用：
 
 ```bat
 nanoamp doctor
 ```
 
-> PATH 的改动只对新开的窗口生效。已经开着的窗口读不到。
+> PATH 的改动只对新开的窗口生效，已经打开的窗口读不到。
 
 ## 三条命令
 
@@ -70,7 +70,7 @@ nanoamp call ^
   --outdir  "D:\results\sampleA"
 ```
 
-`^` 是 cmd 的换行符；在 PowerShell 里用反引号 `` ` ``，或者干脆写成一整行。
+`^` 是 cmd 的换行符；在 PowerShell 里用反引号 `` ` ``，或写成一整行。
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
@@ -90,7 +90,7 @@ nanoamp call ^
 | `--ref-label` | 参考文件名 | 输出里的参考名称 |
 | `--no-intermediates` | 关 | 不保留 BAM 等中间文件 |
 
-不确定参数值该填多少时，先用默认值跑一遍 E4-3 这个样本，再和
+参数取值不确定时，可先用默认值分析 E4-3 这个样本，再与
 `00_materials/tutorial.md` 里的预期输出对比。
 
 ### `nanoamp batch` — 批量
@@ -104,8 +104,8 @@ sampleB	D:/data/sampleB.fastq	D:/data/targetB.fa
 ```
 
 - `sample` 会成为输出子目录名，**不要含 `/` `\` 或空格**；
-- `reads` / `reference` 写绝对路径最稳；相对路径是相对**你敲命令时所在的目录**，
-  不是相对样本表的位置。
+- `reads` / `reference` 建议使用绝对路径；相对路径相对于**执行命令时所在的目录**，
+  而不是相对于样本表的位置。
 
 还可以**加一列可选的 `ref_label`**，给每个样本单独指定参考名称
 （对应 `call` 的 `--ref-label`）。不加这一列就用参考文件名。
@@ -148,17 +148,17 @@ D:\results\
     `-- ...
 ```
 
-任何一个样本失败**不会中断整批**：那一个的 `status` 记为 `error`、`error` 列
-写下报错原因，其余样本照常跑完。所以跑完第一件事是看
+任何一个样本失败**不会中断整批**：该样本的 `status` 记为 `error`、`error` 列
+写下报错原因，其余样本照常跑完。因此分析结束后应首先检查
 `batch_summary.tsv` 的 `status` 列，而不是看屏幕最后一行。
 
-失败的样本如果什么都没产出，它那个空目录会被自动删掉（避免一排空目录
-看起来像"跑了一半"）；万一失败前已经写进去了一些文件，目录会保留下来，
-方便你查现场。成功和失败的样本加起来，目录数和 `batch_summary.tsv` 的
+失败的样本如果没有任何产出，它那个空目录会被自动删掉（避免一排空目录
+看起来像"跑了一半"）；如果失败前已经写进去了一些文件，目录会保留下来，
+便于排查现场。成功和失败的样本加起来，目录数和 `batch_summary.tsv` 的
 `status=ok` 行数应当一致。
 
 > 用 Excel 存 TSV 时注意：选「文本（制表符分隔）」，不要选 CSV。
-> 路径里用正斜杠 `/` 最稳，反斜杠偶尔会被转义。
+> 路径建议使用正斜杠 `/`；反斜杠偶尔会被转义。
 
 ## 输出文件
 
@@ -173,7 +173,7 @@ run_manifest.json       参数、版本、输入哈希（可追溯）
 alignments.bam(.bai)    比对结果（除非 --no-intermediates）
 ```
 
-## 用命令行看结果
+## 用命令行查看结果
 
 ```bat
 :: 前 10 行单倍型表
@@ -183,7 +183,7 @@ more +0 haplotypes.tsv | findstr /n "^" | findstr /b "^[1-9]: ^10:"
 type qc.tsv | findstr n_reads_total
 ```
 
-或者直接用 Excel 打开 `haplotypes.tsv`。
+也可以直接用 Excel 打开 `haplotypes.tsv`。
 
 ## 退出码
 
@@ -192,7 +192,7 @@ type qc.tsv | findstr n_reads_total
 | 0 | 成功 |
 | 1 | 失败（参数错误、文件不存在、依赖缺失、分析出错） |
 
-批量脚本里可以据此判断。
+批量脚本可据此判断执行结果。
 
 ## 构建 / 开发说明
 
@@ -200,7 +200,7 @@ type qc.tsv | findstr n_reads_total
   `%LOCALAPPDATA%\nanoamp\config\`，里面写死了库路径和 `NANOAMP_MINIMAP2`。
 - `nanoamp.cmd` **必须是纯 ASCII**：cmd.exe 用控制台 OEM 代码页读取 `.cmd`，
   UTF-8 中文会被解析成乱码命令。中文说明一律放 README。
-- 仓库内也可以直接跑（不安装）：
+- 仓库内也可以直接运行（不安装）：
 
   ```bat
   set R_LIBS_USER=D:\tools\R\lib

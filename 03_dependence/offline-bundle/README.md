@@ -1,23 +1,21 @@
 # offline-bundle — pre-positioning the installers inside the project
 
-Answering the question "can R, the build toolchain and the external tools all be
-pre-positioned in the project?":
+R, the build toolchain and the external tools can all be pre-positioned inside
+the project, and the mechanism is implemented and verified. The installers
+themselves must not be committed to Git: this directory holds the scripts, and
+the artifacts live in `dist/`, which is git-ignored.
 
-**Technically yes, and it is now implemented and verified — but the installers
-must not be committed to Git.** This directory holds the scripts; the artifacts
-themselves live in `dist/`, which is git-ignored.
-
-## What "already self-contained" vs "still needs installing" means here
+## Self-contained components vs components requiring installation
 
 | Piece | Size | Status |
 |---|---:|---|
-| `minimap2.exe` | 1.3 MB | **already committed** — Windows analysis works out of the box |
+| `minimap2.exe` | 1.3 MB | **already committed** — Windows analysis requires no further installation |
 | samtools | — | **not needed** — `Rsamtools::asBam()` is the default SAM -> BAM path |
 | R runtime + 109 R packages | ~430 MB | must be installed (or provisioned from `dist/`) |
 | MSYS2 + MINGW-w64 toolchain | ~1.5 GB installed / 51 MB tarball | only needed to *rebuild* minimap2 from source |
 
-So an end user needs R plus the package library. A developer who wants to
-rebuild minimap2 additionally needs the toolchain.
+An end user therefore needs R plus the package library. Rebuilding minimap2
+additionally requires the toolchain.
 
 ## What the bundle contains
 
@@ -40,6 +38,15 @@ dist/
 
 Total: **291 MB**, reproducible and pinned.
 
+The published offline asset
+`release/_build/nanoamp-0.1.0-windows-offline-deps.zip` (~248 MB) is packed by
+`release/_build/build_assets.py` from `release/_offline/`, which holds the R
+4.6.1 installer, the 109 R package binaries, the `PACKAGES` index,
+`minimap2.exe` and `build_minimap2.sh`. It therefore corresponds to the R
+runtime, R package repository and aligner parts of `dist/` above; the `msys2/`
+toolchain and `src/` trees are needed only to rebuild the aligner and are not
+shipped.
+
 The package set is not a hand-written list. The script resolves the recursive
 `Depends` / `Imports` / `LinkingTo` closure and then iterates until the closure
 closes (new packages bring their own dependencies — e.g. `futile.logger` pulls
@@ -58,8 +65,8 @@ pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 
 `install_offline.ps1` verifies every file against `SHA256SUMS.txt`, installs R
 silently as the current user (no administrator rights), installs all bundled
-packages from the local repository, installs `nanoamp`, repairs the test-data
-link layer and runs the test suite. It never touches the network.
+packages from the local repository, installs `nanoamp` and runs the bundled
+test suite. It does not use the network.
 
 ## Verified offline
 
@@ -75,8 +82,6 @@ functional (Mode A, E4-3)    : 2/2 ok, mean_overlap 1.0
 ```
 
 ## Why the artifacts are not committed to Git
-
-This is the part worth being explicit about.
 
 1. **Hard file-size limits.** GitHub rejects any push containing a file over
    100 MiB and warns above 50 MiB. The R installer is 87.5 MB — under the hard
@@ -96,32 +101,31 @@ This is the part worth being explicit about.
 5. **It goes stale immediately.** A committed installer is obsolete the moment
    R or Bioconductor releases. A pinned recipe plus hashes stays correct.
 
-## How to pre-position it anyway
+## Pre-positioning the bundle outside the repository
 
-If the goal is a literal self-contained directory that can be copied by USB to
-an air-gapped machine, the bundle already gives you that — just point `dest` at
-a location that is not the Git repository:
+A self-contained directory that can be copied by USB to an air-gapped machine is
+produced by pointing `dest` at a location outside the Git repository:
 
 ```powershell
 Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R D:\nanoamp-offline
 ```
 
-Then the repository stays small and the removable payload is explicit. If you
-really do want it inside the repository, add an exception to `.gitignore`
-(knowing items 1-4 above still apply and the push will likely be rejected):
+The repository then stays small and the removable payload is explicit. Keeping
+the bundle inside the repository requires an exception in `.gitignore`; items
+1-4 above still apply and the push will most likely be rejected:
 
 ```gitignore
 !dist/
 ```
 
-For hosting rather than USB, publish `dist/` as GitHub **release assets**
-instead of commits — releases are designed for large binaries, are not counted
-against repository size, and keep `git clone` fast. Note that uploading them
-requires the same push access that is currently blocked (see work report 6).
+For hosting rather than USB, `dist/` can be published as GitHub **release
+assets** instead of commits: release assets are not counted against repository
+size and keep `git clone` fast. Uploading them requires the same push access
+that is currently blocked (see work report 6).
 
 ## Implementation notes
 
-Two R behaviours cost real time to find and are worth recording:
+Two R behaviours affect the bundle build and are recorded here:
 
 * **`contriburl=` and `repos=` are not interchangeable for a local repository
   root.** `repos="file:///<root>"` resolves

@@ -5,7 +5,7 @@ amplicons. It aligns reads to a target sequence, corrects sequencing errors,
 reconstructs haplotypes, and reports the most abundant sequences with counts
 and proportions.
 
-The package is designed for questions such as:
+The package is intended to answer the following questions:
 
 - How many reads match the intended PCR product exactly?
 - What other sequences are present, and at what proportions?
@@ -57,7 +57,7 @@ devtools::install("02_code/r")
 
 ### 3. Install external tools
 
-Nothing to install: the repository bundles a native Windows `minimap2.exe`.
+No separate installation is required: the repository bundles a native Windows `minimap2.exe`.
 `minimap2` is resolved from `03_dependence/<os>-<arch>/bin/` first, then from
 `PATH`. `samtools` is optional: SAM to BAM conversion uses
 `Rsamtools::asBam()` by default.
@@ -120,11 +120,11 @@ Mode A aligns reads to the target sequence, discovers candidate variants,
 treats differences that do not pass the variant filters as sequencing errors,
 and groups reads by their corrected sequence.
 
-Use Mode A when:
+Mode A is applicable when:
 
 - a reliable target sequence is available;
-- you need quantitative haplotype proportions;
-- you want to distinguish real variants from nanopore errors.
+- quantitative haplotype proportions are required;
+- real variants must be distinguished from nanopore errors.
 
 ### Mode B: de novo clustering (exploratory)
 
@@ -132,12 +132,12 @@ Mode B clusters reads with `DECIPHER::Clusterize` and builds a polished
 consensus for each cluster using `DECIPHER::AlignSeqs` followed by majority
 voting.
 
-Use Mode B when:
+Mode B is applicable when:
 
 - no reliable reference is available;
-- you want a data-driven overview of the main sequence groups;
-- you accept that haplotypes differing by less than the sequencing error rate
-  may not be resolved.
+- a data-driven overview of the main sequence groups is required;
+- haplotypes differing by less than the sequencing error rate may remain
+  unresolved.
 
 If `DECIPHER` is unavailable, Mode B falls back to variant-pattern greedy
 clustering and records this in `qc.tsv`.
@@ -308,8 +308,8 @@ The R-native backend uses Biostrings pairwise alignment and requires no
 external tool. It is slower and is intended for small and medium amplicons.
 
 `samtools` is optional: SAM -> BAM conversion uses `Rsamtools::asBam()` by
-default. Set `use_samtools = TRUE` only if you explicitly want the samtools
-path.
+default. Set `use_samtools = TRUE` only when the samtools path is explicitly
+required.
 
 ## RStudio workflow
 
@@ -323,7 +323,7 @@ The script locates the repository root automatically and writes results under
 ## Using the test data
 
 The repository ships the samples directly under `01_data/<dataset>/<sample>/`
-(ordinary files, committed to Git — nothing to prepare after cloning):
+(ordinary files committed to Git; no preparation is required after cloning):
 
 ```text
 reads.fastq
@@ -372,9 +372,9 @@ The package has been verified with `R CMD check` and currently passes with
 | Symptom | Solution |
 |---|---|
 | `minimap2` not found | Install minimap2 and add it to `PATH` |
-| `samtools` not found | Usually not needed: `Rsamtools` is the default. Install samtools only if `use_samtools = TRUE` |
-| Mode B is slow | Reduce `max_msa_seqs`, increase `threads`, or use `mode = "A"` |
-| Mode B cannot separate close haplotypes | This is expected below the sequencing error rate; use Mode A |
+| `samtools` not found | Usually not required: `Rsamtools` is the default. Install samtools only if `use_samtools = TRUE` |
+| Mode B runs slowly | Reduce `max_msa_seqs`, increase `threads`, or use `mode = "A"` |
+| Mode B cannot resolve closely related haplotypes | This is expected below the sequencing error rate; use Mode A |
 | `DECIPHER` not installed | Mode B falls back to greedy clustering; install DECIPHER for better results |
 | `pairwiseAlignment` is not an exported object from Biostrings | Bioconductor >= 3.19 moved it to `pwalign`; install it with `BiocManager::install("pwalign")` |
 | All proportions are low in Mode C | Nanopore reads contain errors; use Mode A |

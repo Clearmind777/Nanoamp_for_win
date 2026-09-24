@@ -1,7 +1,7 @@
 # 04_builds
 
-Build artifacts. Everything here is reproducible and ignored by Git except this
-README.
+Build artifacts. Everything in this directory is reproducible and ignored by
+Git except this README.
 
 ```text
 04_builds/
@@ -10,13 +10,13 @@ README.
     `-- nanoamp.Rcheck/        # R CMD check output
 ```
 
-Rebuild with:
+Rebuild:
 
 ```bash
 make check
 ```
 
-Clean build artifacts with:
+Remove build artifacts:
 
 ```bash
 make clean-builds

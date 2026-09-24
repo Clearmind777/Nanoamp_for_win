@@ -1,7 +1,7 @@
 # 02_code: Source Code
 
 This directory contains the R package, the R-based command line interface and
-the R Shiny GUI.
+the graphical user interfaces.
 
 This is the **Windows variant** of the project; the Linux variant lives in the
 sister repository `a_09_18_26_mapping_programs_dev_for_linux`.
@@ -28,8 +28,15 @@ sister repository `a_09_18_26_mapping_programs_dev_for_linux`.
 `-- gui/                    # repository Shiny GUI entry points and launchers
 ```
 
-The Python implementation was cancelled; all current development targets R.
-External tools are bundled under `03_dependence/` at the repository root.
+R is the analysis core; the CLI and the GUI front ends are thin shells that
+call the `nanoamp` R package rather than reimplementing the analysis. The
+Python/Tkinter GUI is an additional front end of the same kind. External tools
+are bundled under `03_dependence/` at the repository root.
+
+The Python CLI planned in an earlier revision was not implemented: CLI development
+targets the R package (`nanoamp_cli()`). The Python code in `PythonGUI/` is a
+desktop front end, not a CLI, and is what `release/03_GUI/` packages as
+`nanoamp.exe`.
 
 ## Design principles
 
@@ -40,7 +47,9 @@ External tools are bundled under `03_dependence/` at the repository root.
 3. **Data and code are separate**: test data lives in `01_data/`; run outputs
    live in `tmp/test_results/<front-end>/`.
 4. **Windows first for the GUI**: the GUI is built with Shiny so it runs on
-   Windows, and can be packaged with RInno later.
+   Windows, and can be packaged with RInno later. The Python/Tkinter front end
+   in `PythonGUI/` targets the same Windows desktop and is packaged with
+   PyInstaller instead.
 5. **Bundled tools first**: external tools are resolved from
    `03_dependence/<os>-<arch>/bin/` before `PATH`.
 
@@ -81,7 +90,7 @@ library(nanoamp)
 nanoamp_gui()
 ```
 
-On Windows, after installing the package, double-click or run:
+On Windows, after installing the package, run:
 
 ```bat
 Rscript -e "library(nanoamp); nanoamp_gui()"
@@ -96,7 +105,8 @@ See `gui/README.md` for the GUI plan, launchers and Windows packaging notes.
 | R package | Implemented and verified with `R CMD check` (`Status: OK`) |
 | R-based CLI | Implemented (`nanoamp_cli()` and `02_code/cli`) |
 | R Shiny GUI | Initial version implemented (`nanoamp_gui()` and `02_code/gui`) |
-| Windows installer | Planned via RInno |
+| Python/Tkinter GUI | Implemented and packaged as `02_code/PythonGUI/dist/nanoamp.exe` |
+| Windows installer | Implemented with PyInstaller (`release/_installer/`; ships `install.exe` and `uninstall.exe`) |
 
 External tools are bundled under `03_dependence/`; see `03_dependence/README.md`
 for the platform support matrix and the R-native fallback.

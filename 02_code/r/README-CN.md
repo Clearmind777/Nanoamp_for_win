@@ -53,12 +53,12 @@ devtools::install("02_code/r")
 `minimap2` 会优先从 `03_dependence/<os>-<arch>/bin/` 解析，其次才是 `PATH`。
 `samtools` 不是必需依赖：默认用 `Rsamtools::asBam()` 完成 SAM→BAM。
 
-Linux 和 Windows 下的详细安装与 PATH 配置说明见
+Windows 下的详细安装与 PATH 配置说明见
 [inst/docs/INSTALL_DEPENDENCIES-CN.md](inst/docs/INSTALL_DEPENDENCIES-CN.md)。
 
 `nanoamp` 会优先使用 `03_dependence/<os>-<arch>/bin/` 中的工具，其次才是
-`PATH`。仓库已内置 Linux x86_64 的 minimap2 2.31；平台支持矩阵和 R 内后备
-方案见 `03_dependence/README-CN.md`。
+`PATH`。仓库已内置 Windows x86_64 的 minimap2 2.31（仓库内编译，静态链接）；
+Windows 平台支持矩阵、重建步骤和 R 内后备方案见 `03_dependence/README-CN.md`。
 
 ```bash
 minimap2 --version
@@ -86,7 +86,7 @@ res <- run_haplotype_analysis(
   top_n     = 20
 )
 
-res$haplotypes   # 单倍型排行榜
+res$haplotypes   # 单倍型结果（按支持 reads 数排名）
 res$variants     # 候选变异
 res$qc           # 质控指标
 ```
@@ -118,7 +118,7 @@ res$qc           # 质控指标
 适用于：
 
 - 没有可靠参考；
-- 想快速了解主要序列分组；
+- 需要了解主要序列分组的概况；
 - 可以接受“差异小于测序错误率的单倍型无法分开”这一限制。
 
 如果 `DECIPHER` 不可用，方案 B 会自动降级为变异模式贪心聚类，并在
@@ -299,8 +299,8 @@ R 内后端使用 Biostrings 成对比对，不需要外部工具；速度较慢
 
 ## 使用测试数据
 
-样本直接就在 `01_data/<dataset>/<sample>/` 里（普通文件，随仓库提交，
-clone 后不需要任何准备），每个样本目录包含：
+样本文件位于 `01_data/<dataset>/<sample>/`（普通文件，已随仓库提交，
+clone 后无需额外准备），每个样本目录包含：
 
 ```text
 reads.fastq
@@ -349,9 +349,9 @@ Rscript 02_code/r/inst/scripts/run_functional_tests.R \
 |---|---|
 | 找不到 `minimap2` | 安装 minimap2 并加入 `PATH` |
 | 找不到 `samtools` | 通常不需要：默认使用 `Rsamtools`；只有 `use_samtools = TRUE` 才需要 samtools |
-| 方案 B 太慢 | 降低 `max_msa_seqs`、增加 `threads`，或改用方案 A |
-| 方案 B 分不开相近单倍型 | 这是低于测序错误率时的固有限制，请用方案 A |
-| 没有安装 `DECIPHER` | 方案 B 会自动降级为贪心聚类；建议安装 DECIPHER |
+| 方案 B 运行较慢 | 降低 `max_msa_seqs`、增加 `threads`，或改用方案 A |
+| 方案 B 无法区分相近单倍型 | 这是低于测序错误率时的固有限制，请用方案 A |
+| 未安装 `DECIPHER` | 方案 B 会自动降级为贪心聚类；安装 DECIPHER 可改善聚类结果 |
 | 方案 C 比例很低 | 纳米孔 reads 有错误，请用方案 A |
 
 ## 许可证

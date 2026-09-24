@@ -52,26 +52,26 @@ the resolved path and version of each tool.
 | windows-x86_64 | bundled 2.31 (built in-repo) | not bundled | statically linked, runs without MSYS2/Cygwin/conda/WSL; samtools unnecessary because `Rsamtools::asBam()` is the default SAM -> BAM path |
 | windows-arm64 | no binary | not bundled | use the R-native backend (`aligner = "r"`), or run the x86_64 build under emulation |
 
-Official upstream facts:
+Upstream facts:
 
-- minimap2 publishes a Linux x86_64 binary; there is no *official* Windows
-  binary, but the source builds natively on Windows with the MSYS2 MINGW-w64
-  toolchain — that is how `windows-x86_64/bin/minimap2.exe` was made.
-- samtools publishes only source, and is not needed by this project at all:
-  `Rsamtools::asBam()` converts minimap2 SAM to BAM by default. Only set
-  `use_samtools = TRUE` if you explicitly want the samtools path, in which case
-  you would have to build it yourself (htslib documents MSYS2/MINGW64 as the
+- minimap2 publishes a Linux x86_64 binary; no *official* Windows binary is
+  published, but the source builds natively on Windows with the MSYS2 MINGW-w64
+  toolchain. `windows-x86_64/bin/minimap2.exe` was produced this way.
+- samtools publishes only source and is not required by this project:
+  `Rsamtools::asBam()` converts minimap2 SAM to BAM by default. The samtools
+  path is used only when `use_samtools = TRUE` is set explicitly, which requires
+  building samtools separately (htslib documents MSYS2/MINGW64 as the
   recommended Windows build environment).
-- conda and WSL are deliberately not used anywhere in this project.
+- conda and WSL are not used in this project.
 
 ## R-native fallback
 
 `run_haplotype_analysis(..., aligner = "r")` uses Biostrings/pwalign pairwise
-alignment and needs no external binary at all. It is slower than minimap2 and
-is intended for small and medium amplicons, and for platforms where no
-minimap2 build exists (Windows on ARM).
+alignment and requires no external binary. It is slower than minimap2 and is
+intended for small and medium amplicons, and for platforms where no minimap2
+build exists (Windows on ARM).
 
-Mode C (`mode = "C"`) also needs no external tool.
+Mode C (`mode = "C"`) also requires no external tool.
 
 ## Rebuilding minimap2 on Windows
 
@@ -90,7 +90,7 @@ See `windows-x86_64/README.md` for pinned versions, flags and hashes.
 ## Offline / air-gapped installation
 
 Every upstream installer can be pre-positioned as a pinned, integrity-checked
-bundle so a machine with no network can be provisioned:
+bundle, so that a machine without network access can be provisioned:
 
 ```powershell
 # with a network
@@ -99,10 +99,12 @@ Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R
 pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 ```
 
-The bundle (R installer, the full R package closure, the MSYS2 toolchain and
-the minimap2 source) is written to the git-ignored `dist/`. Why the binaries are
-not committed, and the USB / release-asset alternatives, are documented in
-`offline-bundle/README.md`.
+The bundle written to the git-ignored `dist/` contains the R installer, the full
+R package closure, the MSYS2 toolchain and the minimap2 source. The published
+offline asset `release/_build/nanoamp-0.1.0-windows-offline-deps.zip` (~248 MB)
+contains the R 4.6.1 installer, 109 R package binaries and `minimap2.exe`. Why
+the binaries are not committed, and the USB / release-asset alternatives, are
+documented in `offline-bundle/README.md`.
 
 ## Licenses
 

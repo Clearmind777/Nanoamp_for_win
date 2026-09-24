@@ -1,2 +1,2 @@
-f903245211d1f2e8b88d1d6afa3fea01fda396faed00888208b88f3d21829ea5  nanoamp-0.1.5-windows-setup.zip
+f526e10b196754861836aea60a3fbafa28940a3ee92b0326102c0037ca52c599  nanoamp-0.1.5-windows-setup.zip
 2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40  nanoamp-0.1.0-windows-offline-deps.zip

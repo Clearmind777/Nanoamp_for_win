@@ -27,9 +27,9 @@ from .r_runner import NanoampRunner, RNotFoundError, find_rscript
 
 APP_TITLE = "nanoamp - 纳米孔 PCR 产物分析"
 MODES = [
-    ("A - 参考引导（推荐）", "A"),
+    ("A - 参考引导（默认）", "A"),
     ("B - 从头聚类", "B"),
-    ("C - 精确匹配（仅诊断）", "C"),
+    ("C - 精确匹配（诊断用）", "C"),
 ]
 
 
@@ -135,7 +135,7 @@ class NanoampApp(ttk.Frame):
         self.var_outdir = tk.StringVar(value=str(latest_outdir(repo_root)))
         self.var_mode = tk.StringVar(value="A")
         self.var_topn = tk.IntVar(value=20)
-        self.var_status = tk.StringVar(value="就绪。选择 FASTQ 和参考序列后点击“开始分析”。")
+        self.var_status = tk.StringVar(value="就绪。")
 
         self._build_layout()
         self._detect_environment()
@@ -152,7 +152,7 @@ class NanoampApp(ttk.Frame):
         ttk.Label(header, text=APP_TITLE, font=("Segoe UI", 14, "bold")).pack(anchor="w")
         ttk.Label(
             header,
-            text="分析逻辑由 nanoamp R 包执行，本窗口只是调用它的外壳。",
+            text="本程序为 nanoamp R 包的图形界面。",
             foreground="#555555",
         ).pack(anchor="w")
 
@@ -256,7 +256,7 @@ class NanoampApp(ttk.Frame):
         self.seq_box = tk.Text(frame, height=5, wrap="char", font=("Consolas", 9))
         self.seq_box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self.seq_box.configure(state="disabled")
-        ttk.Label(frame, text="选中某一行可查看该单倍型的完整序列",
+        ttk.Label(frame, text="选中一行可查看对应单倍型序列。",
                   foreground="#777777").grid(row=2, column=0, sticky="w")
         self.tree.bind("<<TreeviewSelect>>", self._on_select_haplotype)
 
@@ -304,12 +304,12 @@ class NanoampApp(ttk.Frame):
             self.runner = NanoampRunner(self.repo_root)
         except RNotFoundError as exc:
             self.runner = None
-            self.var_status.set("未找到 R —— 点击“环境自检”查看详情")
+            self.var_status.set("未找到 R。请运行环境自检。")
             self._append_log(str(exc))
             return
         self._append_log(f"仓库根目录 : {self.repo_root}")
         self._append_log(f"Rscript    : {self.runner.rscript}")
-        self._append_log("已就绪。")
+        self._append_log("初始化完成。")
 
     # ------------------------------------------------------------ actions
     def _pick_reads(self) -> None:
@@ -350,7 +350,7 @@ class NanoampApp(ttk.Frame):
         reference = self.var_reference.get().strip()
         outdir = self.var_outdir.get().strip()
         if not reads or not reference or not outdir:
-            messagebox.showwarning("缺少输入", "请先选择测速文件、目的序列和输出目录。")
+            messagebox.showwarning("输入不完整", "请指定测序文件、目的序列与输出目录。")
             return
         for label, path in (("测序文件", reads), ("目的序列", reference)):
             if not Path(path).is_file():
@@ -358,7 +358,7 @@ class NanoampApp(ttk.Frame):
                 return
 
         if self.runner is None:
-            messagebox.showerror("缺少 R", "没有找到 Rscript。请先运行“环境自检”。")
+            messagebox.showerror("R 不可用", "未找到 Rscript。请先运行环境自检。")
             return
 
         argv = [
@@ -386,7 +386,7 @@ class NanoampApp(ttk.Frame):
         try:
             runner = NanoampRunner(self.repo_root)
         except RNotFoundError as exc:
-            messagebox.showerror("缺少 R", str(exc))
+            messagebox.showerror("R 不可用", str(exc))
             return
         self.runner = runner
         self._cancel_requested = False
@@ -418,7 +418,7 @@ class NanoampApp(ttk.Frame):
         except AttributeError:
             webbrowser.open(path.as_uri())
         except OSError as exc:
-            messagebox.showerror("无法打开", f"{path}\n\n{exc}")
+            messagebox.showerror("打开失败", f"{path}\n\n{exc}")
 
     # -------------------------------------------------------- worker side
     def _run_worker(self, argv: list[str], outdir: Path) -> None:
@@ -466,7 +466,7 @@ class NanoampApp(ttk.Frame):
         self.btn_cancel.configure(state="normal" if running else "disabled")
         if running:
             self.progress.start(12)
-            self.var_status.set("正在分析…（首次运行需加载 R 包，可能稍慢）")
+            self.var_status.set("正在分析…（首次运行需加载 R 包，耗时较长）")
         else:
             self.progress.stop()
 
@@ -482,7 +482,7 @@ class NanoampApp(ttk.Frame):
         self.btn_cancel.configure(state="disabled")
         self.var_status.set("正在取消…")
         self._append_log("")
-        self._append_log("用户请求取消，正在停止 R 进程…")
+        self._append_log("用户请求取消，正在终止 R 进程…")
         self._cancel_requested = True
         # self.runner is set for both paths: _on_run stores the analysis
         # runner and _on_doctor stores the one it created, so either kind of
@@ -505,22 +505,21 @@ class NanoampApp(ttk.Frame):
             # A cancelled run is not a failure: say what happened and where the
             # partial output is, instead of the generic error dialog.
             self._cancel_requested = False
-            self.var_status.set(f"分析已取消。已产生的部分结果在：{outdir}")
+            self.var_status.set(f"分析已取消。部分结果保留在：{outdir}")
             if outdir.is_dir():
                 self.btn_open.configure(state="normal")
             messagebox.showinfo(
                 "已取消",
                 "分析已取消。\n\n"
-                f"已产生的部分结果保留在：\n{outdir}\n\n"
-                "可以重新点击「开始分析」再跑一次。",
+                f"已产生的部分结果保留在：\n{outdir}",
             )
             return
         if code != 0:
-            self.var_status.set(f"分析失败（退出码 {code}）。请查看“运行日志”。")
+            self.var_status.set(f"分析失败（退出码 {code}）。详见运行日志。")
             messagebox.showerror(
                 "分析失败",
-                "分析没有正常完成。\n\n请查看“运行日志”标签页，"
-                "常见原因是 R 包未安装或 minimap2 不可用。",
+                "分析未正常结束。常见原因为 R 包未安装或 minimap2 不可用，"
+                "详见运行日志。",
             )
             return
         self.btn_open.configure(state="normal")
@@ -622,11 +621,11 @@ class NanoampApp(ttk.Frame):
         top_n = self.var_topn.get()
         self._set_text(
             self.seq_box,
-            f"{hid}: 未导出序列。\n\n"
-            f"haplotypes.fasta 只包含前 {top_n} 条（top-n）单倍型的序列，"
-            f"该单倍型排名靠后，因此文件里没有它的序列。\n"
-            f"它的变异组成是：{variants or '.'}\n\n"
-            f"如需其序列，把“显示前 n 条”调大后重新运行。",
+            f"{hid}：未导出序列。\n\n"
+            f"haplotypes.fasta 仅包含前 {top_n} 条单倍型的序列，"
+            f"该单倍型排名超出该范围。\n"
+            f"变异组成：{variants or '.'}\n\n"
+            f"如需其序列，请增大“显示前 n 条”后重新运行。",
         )
 
     @staticmethod

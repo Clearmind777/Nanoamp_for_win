@@ -53,25 +53,25 @@ nanoamp **Windows 版本**随项目分发的外部工具目录。
 上游事实：
 
 - minimap2 只发布 Linux x86_64 预编译包，没有**官方** Windows 二进制；
-  但源码可以用 MSYS2 MINGW-w64 工具链在 Windows 上原生编译 —— 本仓库的
-  `windows-x86_64/bin/minimap2.exe` 就是这么来的。
-- samtools 只发布源码，本项目也**根本不需要**它：默认由
-  `Rsamtools::asBam()` 把 minimap2 的 SAM 转成 BAM。只有显式设置
-  `use_samtools = TRUE` 才会走 samtools，那需要自行编译（htslib 官方
-  INSTALL 文档明确推荐 Windows 用 MSYS2/MINGW64）。
-- 本项目**全程不使用 conda，也不使用 WSL**。
+  源码可以用 MSYS2 MINGW-w64 工具链在 Windows 上原生编译，本仓库的
+  `windows-x86_64/bin/minimap2.exe` 即由此生成。
+- samtools 只发布源码，本项目不需要它：默认由 `Rsamtools::asBam()` 把
+  minimap2 的 SAM 转成 BAM。仅在显式设置 `use_samtools = TRUE` 时才会走
+  samtools 路径，此时需要自行编译（htslib 官方 INSTALL 文档推荐 Windows
+  使用 MSYS2/MINGW64）。
+- 本项目不使用 conda，也不使用 WSL。
 
 ## R 内比对后端
 
 `run_haplotype_analysis(..., aligner = "r")` 使用 Biostrings/pwalign 的成对比对，
-不依赖任何外部二进制。它比 minimap2 慢，适合中小扩增子，以及 Windows on ARM
-这类没有 minimap2 构建的平台。
+不依赖任何外部二进制。其速度低于 minimap2，适用于中小扩增子，以及
+Windows on ARM 这类没有 minimap2 构建的平台。
 
-方案 C（`mode = "C"`）同样不需要任何外部工具。
+方案 C（`mode = "C"`）同样不需要外部工具。
 
 ## Windows 源码编译
 
-Windows 上不需要 conda，也不需要 WSL，两步即可：
+编译分两步，不使用 conda 或 WSL：
 
 ```powershell
 # 1. 便携式 MSYS2 + MINGW-w64 工具链（约 1.5 GB，位于仓库之外）
@@ -86,8 +86,7 @@ bash 03_dependence/windows-x86_64/build_minimap2.sh
 
 ## 离网安装
 
-可以把全部上游安装程序预置成一个固定版本、带完整性校验的安装包，
-供无网机器一次性部署：
+上游安装程序可以预置为固定版本、带完整性校验的离线包，用于无网络机器的部署：
 
 ```powershell
 # 有网机器
@@ -96,9 +95,11 @@ Rscript 03_dependence/offline-bundle/fetch_offline_bundle.R
 pwsh -File 03_dependence/offline-bundle/install_offline.ps1
 ```
 
-安装包（R 安装器、R 包依赖闭包、MSYS2 工具链、minimap2 源码）写入
-git 忽略的 `dist/`。为什么不入库、以及 USB / release assets 两种替代方案，
-见 `offline-bundle/README.md`。
+写入 git 忽略的 `dist/` 的离线包包含 R 安装器、R 包依赖闭包、MSYS2 工具链与
+minimap2 源码。已发布的离线依赖资产
+`release/_build/nanoamp-0.1.0-windows-offline-deps.zip`（约 248 MB）包含
+R 4.6.1 安装器、109 个 R 包二进制与 `minimap2.exe`。不入库的原因，以及
+USB / release assets 两种替代方案，见 `offline-bundle/README.md`。
 
 ## 许可证
 

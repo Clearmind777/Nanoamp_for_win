@@ -1,7 +1,7 @@
 # 01_data
 
-nanoamp 的测试数据。**没有链接层**：每个样本目录里直接就是分析要用的文件，
-文件即数据，随仓库提交，clone 之后不需要任何准备步骤。
+nanoamp 的测试数据。仓库不包含链接层：每个样本目录下直接存放分析所需的文件，
+随仓库提交，clone 后不需要额外的准备步骤。
 
 ```text
 01_data/
@@ -27,7 +27,7 @@ nanoamp 的测试数据。**没有链接层**：每个样本目录里直接就�
   meta.tsv             角色 → 文件名 → 公司原始文件的对应表
 ```
 
-例：
+示例：
 
 ```text
 01_data/TSM20260826/E4-3/
@@ -40,7 +40,7 @@ nanoamp 的测试数据。**没有链接层**：每个样本目录里直接就�
   meta.tsv
 ```
 
-分析只需要 `reads.fastq` + 一个参考（`reference.self.fa` 或 `reference.wt.fa`）：
+分析仅需要 `reads.fastq` 和一个参考序列（`reference.self.fa` 或 `reference.wt.fa`）：
 
 ```powershell
 Rscript -e "library(nanoamp); run_haplotype_analysis( \
@@ -49,13 +49,13 @@ Rscript -e "library(nanoamp); run_haplotype_analysis( \
   outdir='tmp/test_results/r/demo/E4-3', mode='A')"
 ```
 
-GUI 里选完 FASTQ 后，如果同目录里有 `reference.self.fa`，会自动填上参考序列。
+在 GUI 中选择 FASTQ 后，若同目录存在 `reference.self.fa`，参考序列会被自动填入。
 
 ## meta.tsv：每个文件的来历
 
-公司交付的文件名带着样本、项目号、日期、孔位（例如
-`E4-3_TSM20260826-020-01254_20260827-020-BAN05-5_H08.fastq`），仓库里统一改成
-上面的固定名字，原始文件名记录在 `meta.tsv` 里：
+公司交付的文件名包含样本、项目号、日期与孔位（例如
+`E4-3_TSM20260826-020-01254_20260827-020-BAN05-5_H08.fastq`），仓库内统一改为
+上面的固定名字，原始文件名记录在 `meta.tsv` 中：
 
 | 列 | 含义 |
 |---|---|
@@ -65,11 +65,11 @@ GUI 里选完 FASTQ 后，如果同目录里有 `reference.self.fa`，会自动�
 | `file` | 本目录里的文件名 |
 | `source_dir` | 公司交付时的批次目录 |
 | `source_file` | 公司交付时的原始文件名 |
-| `source_note` | 该参考是怎么选的（例如"公司主导共识序列（cluster 1）"） |
+| `source_note` | 该参考序列的来源说明（例如"公司主导共识序列（cluster 1）"） |
 
-同一个公司的文件可能被多个角色用到（`reference.self.fa` 就是该样本 cluster 1 的
-共识序列，`reference.wt.fa` 是另一个样本的共识序列），所以这些文件在目录里是各自的
-副本 —— 分析要的是"文件就在那儿"，不是层层跳转的链接。
+同一份公司文件可能被多个角色使用（`reference.self.fa` 是该样本 cluster 1 的
+共识序列，`reference.wt.fa` 是另一个样本的共识序列），因此这些文件在各自目录中
+保存为独立副本；分析直接读取文件本身，不依赖链接跳转。
 
 ## 新增一个样本
 
@@ -87,17 +87,17 @@ TSM20260826	E4-3	reference.self		reference.self.fa	TSM20260826-020-01254	E4-3_..
 ```
 
 功能回归（`run_functional_tests.R`）会遍历 `01_data/*/*/meta.tsv` 自动发现样本，
-按 `role` 找到要跑的文件；没有 `meta.tsv` 的目录（例如两个 SD 批次）会被跳过。
+并按 `role` 确定要运行的文件；没有 `meta.tsv` 的目录（例如两个 SD 批次）会被跳过。
 
 ## 两个 SD 批次与 README-raw.md
 
 `SD260728184122_1/`、`SD260812174403_1/` 是公司的结构化交付（`Bam/`、`Var/`、
 `QC/`、`Sequence/` + `merged_data.*.xls`），包含扩增子参考序列、变异表、覆盖度图和
-Sanger 峰图，但**没有 FASTQ**，所以不在上面的样本命名体系里，保持公司原样保留。
+Sanger 峰图，但不包含 FASTQ，因此不属于上面的样本命名体系，按公司原始结构保留。
 
 `README-raw.md` 是公司交付文件的完整说明：目录结构、命名规则、每种文件后缀的用途、
-变异表字段、以及一批容易踩的坑（例如 `.var.xls` 其实是 TSV、BAM 的参考不是全基因组、
-低深度样本的解释要谨慎）。
+变异表字段，以及若干注意事项（例如 `.var.xls` 实际是 TSV、BAM 的参考不是全基因组、
+低深度样本的解释需谨慎）。
 
 ## 数据来源
 
@@ -106,5 +106,5 @@ Sanger 峰图，但**没有 FASTQ**，所以不在上面的样本命名体系里
 `TSM20260826` 的名称来自项目号 `TSM20260826-020-01254` 的短名；`nano_seq` 是
 2026-09-17 批次的目录名；`ZNF8` 是靶点名。
 
-样本与实验条件（哪个基因、哪种编辑、预期结果）不在数据本身里，需要结合实验记录；
+样本与实验条件（哪个基因、哪种编辑、预期结果）不在数据文件本身中，需要结合实验记录；
 `README-raw.md` 第 11 节列出了仅凭数据无法确定的项目。

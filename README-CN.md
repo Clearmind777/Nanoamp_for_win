@@ -23,7 +23,7 @@ Linux 变体在姊妹仓库 `a_09_18_26_mapping_programs_dev_for_linux`。
   PythonGUI/      Python/Tkinter 图形界面（发行版 GUI 就是它的产物）
   shared/         跨语言参数与输出契约
 03_dependence/    内置 minimap2.exe、编译方案、离网安装包、R 环境脚本
-release/          发布产物：三个交付形态 + 一键安装/卸载器
+release/          发布产物：三个交付形态 + 安装/卸载器
 04_builds/        R 构建包和 R CMD check 产物（Git 忽略）
 tmp/test_results/ 运行结果（除 README 外 Git 忽略）
 ```
@@ -31,7 +31,7 @@ tmp/test_results/ 运行结果（除 README 外 Git 忽略）
 ## 快速开始
 
 仓库已内置 `minimap2.exe`（静态链接，运行时不需要 MSYS2 / Cygwin / conda / WSL），
-所以正常情况下只需要 R。
+因此在正常情况下仅需要 R。
 
 ```powershell
 # 1. 安装 R 包（R 本身怎么装见 03_dependence/r-environment/README.md）
@@ -66,7 +66,7 @@ res$haplotypes
 
 ### 测试数据：`01_data/<dataset>/<sample>/`
 
-样本目录里直接就是分析要用的文件，**文件名固定**：
+样本目录中直接存放分析所需的文件，**文件名固定**：
 
 ```text
 01_data/TSM20260826/E4-3/
@@ -79,12 +79,12 @@ res$haplotypes
   meta.tsv               ← 上面每个文件原本是公司的哪个交付文件
 ```
 
-这些都是**普通文件、随仓库提交**，clone 之后不需要任何生成/修复步骤，
-直接用 `reads.fastq` + `reference.self.fa` 就能分析（GUI 选完 FASTQ 会自动
-在同一个目录里找 `reference.self.fa`）。
+这些都是**普通文件、随仓库提交**，clone 之后不需要任何生成或修复步骤，
+直接使用 `reads.fastq` + `reference.self.fa` 即可分析（GUI 选择 FASTQ 后会自动
+在同一目录中查找 `reference.self.fa`）。
 
-要新增样本：建 `01_data/<dataset>/<sample>/`，把文件按上面的名字放进去，
-再写一份 `meta.tsv`（列：`dataset / sample / role / cluster / file /
+要新增样本：建立 `01_data/<dataset>/<sample>/`，按上述名称放入文件，
+并编写一份 `meta.tsv`（列：`dataset / sample / role / cluster / file /
 source_dir / source_file / source_note`）。功能回归会自动发现所有带
 `meta.tsv` 的样本目录。`01_data/README-raw.md` 保留了公司原始交付的
 文件命名与目录结构说明，`SD260728184122_1/`、`SD260812174403_1/` 两个批次
@@ -101,8 +101,8 @@ source_dir / source_file / source_note`）。功能回归会自动发现所有�
 | `02_code/cli/README.md` | CLI 契约与启动器 |
 | `02_code/gui/README.md` | R Shiny GUI 功能 |
 | `02_code/PythonGUI/README.md` | Python/Tkinter 界面实现与打包细节 |
-| `01_data/README.md` | 链接层为何不提交、怎么重建 |
-| `release/README.md` | 发布产物与一键安装器 |
+| `01_data/README.md` | 链接层的提交策略与重建方法 |
+| `release/README.md` | 发布产物与安装器 |
 | `03_dependence/README-CN.md` | 内置工具与 Windows 平台支持矩阵 |
 | `03_dependence/windows-x86_64/README.md` | Windows 源码编译 minimap2 |
 | `03_dependence/r-environment/README.md` | R 环境搭建与测试运行 |
@@ -151,7 +151,7 @@ Rscript 03_dependence/r-environment/run_functional_regression.R `
 
 ## 离网安装
 
-可以把全部上游安装程序预置成一个固定版本、带完整性校验的安装包，
+可将全部上游安装程序预置成一个固定版本、带完整性校验的安装包，
 供无网机器一次性部署（R 安装器、完整 R 包依赖闭包、MSYS2 工具链、minimap2 源码）：
 
 ```powershell

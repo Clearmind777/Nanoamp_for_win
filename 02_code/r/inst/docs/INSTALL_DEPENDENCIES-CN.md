@@ -21,7 +21,7 @@ Linux 变体在姊妹仓库 `a_09_18_26_mapping_programs_dev_for_linux`。
 
 ## 2. minimap2 已经内置
 
-正常情况下什么都不用装：仓库已经带了原生 Windows 版 minimap2 2.31，
+通常无需另行安装：仓库已内置原生 Windows 版 minimap2 2.31，
 
 ```text
 03_dependence\windows-x86_64\bin\minimap2.exe
@@ -33,7 +33,7 @@ Linux 变体在姊妹仓库 `a_09_18_26_mapping_programs_dev_for_linux`。
 2. `03_dependence\<os>-<arch>\bin\`（Windows 下为 `.exe`）；
 3. `PATH`。
 
-内置二进制就位于第 2 级，因此会被自动找到，无需改 PATH。它是静态链接
+内置二进制在第 2 级被解析，因此会被自动找到，无需修改 PATH。它是静态链接
 libwinpthread 和 zlib 的，只依赖 `KERNEL32.dll` 和 `msvcrt.dll`，
 在没装 MSYS2 / Cygwin / conda / WSL 的机器上也能直接运行。
 
@@ -50,7 +50,7 @@ nanoamp:::nanoamp_tool_version("minimap2")
 ### 从源码重建
 
 上游没有官方 Windows 二进制，但 minimap2 可以用 MSYS2 MINGW-w64 工具链在
-Windows 上原生编译。两步、无人值守、不需要管理员权限：
+Windows 上原生编译。以下两步无需人工干预，也不需要管理员权限：
 
 ```powershell
 # 1. 便携式 MSYS2 + MINGW-w64 工具链（约 1.5 GB，位于仓库之外）
@@ -63,9 +63,9 @@ bash 03_dependence/windows-x86_64/build_minimap2.sh
 固定版本、关键编译参数和产物哈希见
 `03_dependence/windows-x86_64/README.md`。
 
-### 如果不能用内置二进制
+### 无法使用内置二进制时
 
-Windows on ARM，或者你希望完全不依赖外部工具时，用 R 内后端：
+在 Windows on ARM 或需要完全不依赖外部工具时，可使用 R 内后端：
 
 ```r
 run_haplotype_analysis(..., aligner = "r")
@@ -73,9 +73,9 @@ run_haplotype_analysis(..., aligner = "r")
 
 它比 minimap2 慢，适合中小扩增子。方案 C 同样不需要任何外部工具。
 
-也可以自带构建：把 `minimap2.exe` 放到
-`03_dependence\windows-x86_64\bin\` 即可被自动解析，或用
-`NANOAMP_MINIMAP2` 指向它。加进 `PATH` 也可以，但没有必要。
+也可以使用自行构建的二进制：将 `minimap2.exe` 放入
+`03_dependence\windows-x86_64\bin\` 即可被解析，或用
+`NANOAMP_MINIMAP2` 指向它。加入 `PATH` 也可以，但没有必要。
 
 ## 3. samtools
 
@@ -109,7 +109,7 @@ BiocManager::install("pwalign")      # Bioconductor >= 3.19 下 aligner = "r" �
 install.packages(c("shiny", "DT"))   # GUI
 ```
 
-想完全脚本化安装（含仓库之外的专用库和本次网络可用的镜像），用：
+如需完全脚本化安装（包含仓库之外的专用库和本网络可用的镜像），执行：
 
 ```powershell
 Rscript 03_dependence/r-environment/setup_r_environment.R
@@ -140,9 +140,9 @@ Rscript: ...
 - `minimap2` 应显示路径而不是 `NOT FOUND`；
 - `samtools` 显示 `NOT FOUND` 是正常的，无影响；
 - R 包应为 `TRUE`；
-- `DECIPHER` 可能是 `FALSE`：方案 B 会退化为贪心聚类仍可运行，但推荐装上。
+- `DECIPHER` 可能是 `FALSE`：方案 B 会退化为贪心聚类，仍可运行；建议安装 DECIPHER。
 
-## 6. Windows 常见坑
+## 6. Windows 常见问题
 
 - **`conda install minimap2 samtools` 不可用**：这些包没有 win-64 构建，
   而且本项目本来就不用 conda。
@@ -150,7 +150,7 @@ Rscript: ...
 - **PATH 未刷新**：改完 `PATH` 要重启 RStudio。
 - **路径含空格或中文**：优先用 `C:\tools\...` 这类路径。
 - **Windows SmartScreen**：如被拦截，放行下载的二进制。
-- **装了多个 R**：用 `Rscript -e 'cat(R.home())'` 确认包装到了你实际使用的 R。
+- **存在多个 R 安装**：用 `Rscript -e 'cat(R.home())'` 确认包安装到了实际使用的 R 中。
 
 ## 7. 依赖削减现状
 

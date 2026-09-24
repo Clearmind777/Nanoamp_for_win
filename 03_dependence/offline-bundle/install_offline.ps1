@@ -8,7 +8,7 @@
     Steps:
       1. verify every bundled file against SHA256SUMS.txt
       2. install R silently, current-user only (no administrator rights)
-      3. install all 90 R package binaries from the bundle's local repository
+      3. install all 109 R package binaries from the bundle's local repository
       4. install the nanoamp package itself and run the bundled test suite
 
     No conda, no WSL, and no network access is required or used.

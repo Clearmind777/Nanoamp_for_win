@@ -18,7 +18,7 @@ Nothing R-related lives inside the repository, so the working tree stays clean.
 ## 1. Install R
 
 Download the official Windows installer and run it silently, current-user only
-(no administrator rights needed):
+(no administrator rights required):
 
 ```powershell
 curl.exe -L --ssl-no-revoke -o R-win.exe https://cloud.r-project.org/bin/windows/base/R-4.6.1-win.exe
@@ -28,7 +28,7 @@ Start-Process .\R-win.exe -ArgumentList '/VERYSILENT','/NORESTART','/CURRENTUSER
 ## 2. Point R at a dedicated library
 
 Add this to `D:\tools\R\R-4.6.1\etc\Rprofile.site` so every session finds the
-private library and a mirror that is reachable:
+private library and a reachable mirror:
 
 ```r
 local({
@@ -82,19 +82,18 @@ have no FASTQ) and their naming rules are documented in
 
 ## Notes on this network
 
-Two environment quirks shaped the setup above and are worth knowing if you
-reproduce it:
+Two environment constraints shaped the setup above and affect reproduction:
 
 1. **Git and curl fail with `CRYPT_E_REVOCATION_OFFLINE`.** The certificate
-   revocation responder is unreachable here. Fixes used:
+   revocation responder is unreachable from this network. Workarounds:
    `curl --ssl-no-revoke`, and for git either
    `git config http.sslBackend openssl` or
    `git config http.schannelCheckRevoke false`.
 2. **Throughput is very uneven between hosts.** Mirrors used:
    `mirrors.tuna.tsinghua.edu.cn` (~3 MB/s), while `github.com` release
    assets, `raw.githubusercontent.com` and `sourceforge.net` measured
-   ~30-60 KB/s and `mirror.msys2.org` stalled at ~8 KB/s. Prefer TUNA for
-   CRAN, MSYS2 and Rtools downloads.
+   ~30-60 KB/s and `mirror.msys2.org` stalled at ~8 KB/s. TUNA is the
+   preferred mirror for CRAN, MSYS2 and Rtools downloads.
 
 ## `pwalign` compatibility
 

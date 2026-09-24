@@ -73,7 +73,9 @@ top1_proportion
 top1_is_reference
 ```
 
-方案 A 额外包含 `aligner`、`n_raw_variants`、`n_pass_variants`、`exact_reference_proportion`。方案 B 额外包含 `aligner`、`identity_cutoff`、`clustering_method`、`consensus_method`、`decipher_version`。
+方案 A 额外包含 `aligner`、`n_raw_variants`、`n_pass_variants`、
+`exact_reference_proportion`。方案 B 额外包含 `aligner`、`identity_cutoff`、
+`clustering_method`、`consensus_method`、`decipher_version`。
 
 ## run_manifest.json
 

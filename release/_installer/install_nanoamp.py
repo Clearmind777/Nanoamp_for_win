@@ -886,7 +886,7 @@ class Installer:
         target = self.ctx.install_root / "R"
         target.mkdir(parents=True, exist_ok=True)
         rdir = target / "R-runtime"
-        self.say(f"正在安装 R（约需 1-3 分钟，请勿关闭窗口）…")
+        self.say(f"正在安装 R（约 1–3 分钟，请勿关闭窗口）…")
         self.say(f"安装位置：{rdir}")
 
         # R's installer is Inno Setup. Left to its defaults it also drops an
@@ -1094,8 +1094,8 @@ if (!ok) stop("关键依赖安装后仍不可用")
             if not self._fetch_one_package(pinned, pkg, mirrors, target):
                 self.say(f"下载失败：{pkg.name} {pkg.version} —— 已试过所有镜像，"
                          f"拿不到这个版本（镜像上可能已更新）")
-                self.say("如果反复失败，请改下载离线依赖包（nanoamp-0.1.0-windows-offline-deps.zip），"
-                         "里面有这一套完全相同的版本。")
+                self.say("若反复失败，请改用离线依赖包（nanoamp-0.1.0-windows-offline-deps.zip），"
+                         "其中包含同一套版本。")
                 return None
             files.append(target)
             got += pkg.size
@@ -1240,7 +1240,7 @@ quit(save = "no", status = status, runLast = FALSE)
             self.say("（已按参数要求跳过修改 PATH）")
         elif added:
             self.say(f"已把 {self.ctx.bin} 加入用户 PATH")
-            self.say("提示：新开的命令行窗口才会生效。")
+            self.say("提示：新的命令行窗口才会生效。")
         else:
             self.say(f"{self.ctx.bin} 已在 PATH 中")
 
@@ -1260,7 +1260,7 @@ quit(save = "no", status = status, runLast = FALSE)
     def _configure_gui(self) -> bool:
         gui = self.ctx.gui_exe
         if gui is None:
-            self.say("安装包内没有找到图形界面 nanoamp.exe，跳过快捷方式。")
+            self.say("安装包内未找到图形界面 nanoamp.exe，跳过快捷方式创建。")
             return True
         target_dir = self.ctx.app
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -1271,10 +1271,10 @@ quit(save = "no", status = status, runLast = FALSE)
         if not self.ctx.make_shortcut:
             self.say("（已按参数要求跳过创建桌面快捷方式）")
             return True
-        if _create_shortcut(target, "nanoamp 分析工具（双击打开）"):
+        if _create_shortcut(target, "nanoamp 分析工具"):
             self.say("已在桌面创建快捷方式")
         else:
-            self.say(f"桌面快捷方式创建失败，可直接双击 {target}")
+            self.say(f"桌面快捷方式创建失败，可直接运行 {target}")
         return True
 
     def _self_check(self) -> bool:
@@ -1452,11 +1452,13 @@ class InstallerWindow:
         pad = 14
         head = ttk.Frame(self.root, padding=(pad, pad, pad, 6))
         head.pack(fill="x")
-        ttk.Label(head, text="nanoamp 一键安装", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
+        ttk.Label(head, text="nanoamp 安装程序", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(
             head,
-            text="这个程序会自动安装分析所需的一切：R、依赖包、主程序、命令和桌面快捷方式。\n"
-                 "全程无需联网，无需管理员权限，大约需要 3-10 分钟。",
+            text="安装程序将配置 R 运行环境与全部依赖包，安装 nanoamp 主程序，"
+                 "并注册命令行入口与桌面快捷方式。\n"
+                 "仅需当前用户目录的写入权限，不需要管理员权限；预计 3–10 分钟"
+                 "（联网下载依赖时为 5–15 分钟）。",
             font=("Microsoft YaHei UI", 9),
             foreground="#444444",
             justify="left",
@@ -1475,8 +1477,8 @@ class InstallerWindow:
         ttk.Button(row, text="恢复默认", command=self._reset_install_root).grid(row=0, column=2, padx=(6, 0))
         ttk.Label(
             loc,
-            text="默认装在当前用户目录下，不需要管理员权限。"
-                 "也可以改到 D:\\nanoamp 这类位置（路径请避免中文和空格）。",
+            text="默认安装到当前用户目录，不需要管理员权限。"
+                 "可改为 D:\\nanoamp 等位置；路径应避免中文与空格。",
             font=("Microsoft YaHei UI", 8),
             foreground="#666666",
             wraplength=690,
@@ -1492,12 +1494,12 @@ class InstallerWindow:
         # -- options ---------------------------------------------------------
         opts = ttk.LabelFrame(self.root, text="选项", padding=8)
         opts.pack(fill="x", padx=pad, pady=(8, 0))
-        ttk.Checkbutton(opts, text="在桌面创建快捷方式（推荐）",
+        ttk.Checkbutton(opts, text="在桌面创建快捷方式",
                         variable=self.var_shortcut).pack(anchor="w")
-        ttk.Checkbutton(opts, text="把 nanoamp 命令加入用户 PATH（推荐）",
+        ttk.Checkbutton(opts, text="将 nanoamp 命令加入用户 PATH",
                         variable=self.var_path).pack(anchor="w")
 
-        self.step_label = ttk.Label(self.root, text="准备就绪，点击下方按钮开始安装。",
+        self.step_label = ttk.Label(self.root, text="就绪。点击“开始安装”继续。",
                                     font=("Microsoft YaHei UI", 10), padding=(pad, 6))
         self.step_label.pack(anchor="w")
 
@@ -1575,7 +1577,7 @@ class InstallerWindow:
         """
         current = self.var_install_root.get().strip() or str(common.default_install_home())
         chosen = filedialog.askdirectory(
-            title="选择安装位置（选中一个文件夹，nanoamp 会装在里面）",
+            title="选择安装位置",
             initialdir=current if Path(current).is_dir() else str(Path(current).parent),
             mustexist=False,
         )
@@ -1633,13 +1635,13 @@ class InstallerWindow:
             # The drive itself is unreachable (typo, removed USB stick, network
             # share that is down). Say so instead of just turning red.
             self.lbl_space.configure(
-                text=f"将安装到：{target}    无法读取该磁盘的剩余空间，请检查路径是否存在",
+                text=f"将安装到：{target}    无法读取该磁盘剩余空间，请确认路径存在",
                 foreground="#b00020",
             )
             return
         text = f"将安装到：{target}    该磁盘剩余 {free / 1e9:.1f} GB"
         if free < need:
-            text += "  （不足，建议至少 1.5 GB）"
+            text += "  （空间不足，建议至少 1.5 GB）"
         self.lbl_space.configure(
             text=text, foreground="#b00020" if free < need else "#666666"
         )
@@ -1657,7 +1659,7 @@ class InstallerWindow:
 
         root_text = self.var_install_root.get().strip()
         if not root_text:
-            self._alert("showwarning", APP_TITLE, "请先选择安装位置。")
+            self._alert("showwarning", APP_TITLE, "请指定安装位置。")
             return
         target = Path(root_text)
         illegal = _illegal_path_chars(target)
@@ -1666,13 +1668,13 @@ class InstallerWindow:
             self._alert("showerror", APP_TITLE,
                 f"安装路径含有不能用于文件名的字符：{' '.join(illegal)}\n\n"
                 f"{target}\n\n"
-                "请改用只含字母、数字、空格和普通符号的路径。",
+                "请改用仅含字母、数字、空格与常用符号的路径。",
             )
             return
         if target.exists() and not target.is_dir():
             self._alert("showerror", APP_TITLE,
-                f"这个位置已经有一个同名文件：\n{target}\n\n"
-                "请换一个目录，或先改名/删除那个文件。",
+                f"该位置已存在同名文件：\n{target}\n\n"
+                "请更换目录，或先重命名/删除该文件。",
             )
             return
 
@@ -1680,8 +1682,8 @@ class InstallerWindow:
         existing = common.find_existing_install()
         if existing and Path(existing[0]).resolve() != target.resolve():
             if not self._alert("askyesno", APP_TITLE,
-                f"检测到已有一份 nanoamp 安装在：\n{existing[0]}\n\n"
-                f"继续会在新位置再装一份（旧的那份需要另行卸载）。\n\n是否继续？",
+                f"检测到已安装的 nanoamp：\n{existing[0]}\n\n"
+                f"继续将在新位置再安装一份（原安装需另行卸载）。\n\n是否继续？",
             ):
                 return
 
@@ -1725,9 +1727,9 @@ class InstallerWindow:
                     self.btn_cancel.configure(state="disabled")
                     self.step_label.configure(text="安装失败。")
                     self._alert("showerror", APP_TITLE,
-                        "安装过程中出现错误。\n\n"
+                        "安装过程中发生错误。\n\n"
                         f"{ev[1]}\n\n"
-                        "请把“安装详情”里的内容发给技术支持。",
+                        "请将“安装详情”中的内容提供给技术支持。",
                     )
                 elif kind == "ask_r":
                     self._ask_r()
@@ -1750,7 +1752,7 @@ class InstallerWindow:
         self.btn_cancel.configure(state="disabled")
         self.step_label.configure(text="正在取消…")
         self._log("")
-        self._log("用户请求取消，正在停止并清理…")
+        self._log("用户请求取消，正在终止并清理…")
         INSTALL_LOG.write("user requested cancel")
         installer.cancel()
 
@@ -1759,21 +1761,21 @@ class InstallerWindow:
         self.btn_cancel.configure(state="disabled")
         self.step_label.configure(text="已取消。")
         self._log("")
-        self._log("安装已取消，本次产生的文件已清理。")
+        self._log("安装已取消，本次生成的文件已清理。")
         self._alert(
             "showinfo", APP_TITLE,
-            "已取消安装。\n\n"
-            "本次安装产生的内容已经清理干净，电脑保持原样，可以随时重新安装。",
+            "安装已取消。\n\n"
+            "本次安装生成的内容已全部清理，系统状态未改变，可随时重新安装。",
         )
 
     def _ask_r(self) -> None:
         self.btn.configure(state="normal")
         self.step_label.configure(text="需要先安装 R。")
         again = self._alert("askretrycancel", APP_TITLE,
-            "没有在电脑上找到可用的 R（统计分析环境）。\n\n"
-            "请先到 https://cran.r-project.org/bin/windows/base/ 下载并安装 R，\n"
-            "安装时全部点“下一步”即可，然后回到本窗口点击“重试”。\n\n"
-            "如果安装包里有 _offline/r 文件夹，也可以把 R 安装器放进去后重试。",
+            "未在本机找到可用的 R。\n\n"
+            "请从 https://cran.r-project.org/bin/windows/base/ 下载并安装 R 4.6.x，\n"
+            "完成后回到本窗口点击“重试”。\n\n"
+            "若安装包内存在 _offline/r 文件夹，也可将 R 安装器放入其中后重试。",
         )
         if again:
             self._rearm()
@@ -1795,18 +1797,18 @@ class InstallerWindow:
             gui = self.ctx.app / "nanoamp.exe"
             steps = []
             if self.ctx.make_shortcut:
-                steps.append("1）双击桌面上的「nanoamp 分析工具」打开图形界面；")
+                steps.append("1）双击桌面快捷方式「nanoamp 分析工具」启动图形界面；")
             else:
-                steps.append(f"1）双击这个文件打开图形界面：\n   {gui}")
-            steps.append("2）选好测序文件和目的序列，点「开始分析」；")
-            steps.append("3）结果会显示在同一个窗口里。")
+                steps.append(f"1）双击以下文件启动图形界面：\n   {gui}")
+            steps.append("2）指定测序文件与目的序列，点击「开始分析」；")
+            steps.append("3）结果在同一窗口内显示。")
             tail = [f"\n安装位置：{self.ctx.install_root}"]
             if self.ctx.touch_path:
-                tail.append("命令行用法：新开一个命令行窗口，输入 nanoamp doctor")
+                tail.append("命令行：在新的命令行窗口中输入 nanoamp doctor")
             else:
-                tail.append(f"命令行用法：{self.ctx.bin}\\nanoamp.cmd doctor（未加入 PATH）")
+                tail.append(f"命令行：{self.ctx.bin}\\nanoamp.cmd doctor（未加入 PATH）")
             self._alert("showinfo", APP_TITLE,
-                "安装完成！\n\n接下来可以这样使用：\n\n"
+                "安装完成。\n\n可用入口：\n\n"
                 + "\n".join(steps)
                 + "\n"
                 + "\n".join(tail),
@@ -1814,7 +1816,7 @@ class InstallerWindow:
         else:
             self.step_label.configure(text="安装未全部成功，请查看安装详情。")
             self._alert("showwarning", APP_TITLE,
-                "安装没有完全成功。\n\n请查看「安装详情」里的信息，或修好问题后重试一次。",
+                "安装未全部成功。\n\n请查看「安装详情」中的信息，排除问题后重试。",
             )
 
     def run(self) -> int:
@@ -2095,7 +2097,7 @@ def main() -> int:
 
     # Development machines may not have the payload next to the script.
     if not (app_dir() / "_offline").is_dir():
-        print("警告：未找到 _offline 目录，安装包可能不完整。", file=sys.stderr)
+        print("注意：未找到 _offline 目录，安装器将联网获取依赖包。", file=sys.stderr)
 
     return InstallerWindow().run()
 

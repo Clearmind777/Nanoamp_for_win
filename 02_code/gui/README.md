@@ -3,11 +3,12 @@
 The GUI is implemented with R Shiny and shipped inside the `nanoamp` R package.
 The GUI calls the same R analysis functions as the CLI.
 
-> There is also a Python/Tkinter desktop window in `02_code/PythonGUI/`, which ships as a
-> double-clickable `02_code/PythonGUI/dist/nanoamp.exe`. It is a native window with no
-> browser and no HTTP server, but fewer parameters. Both front ends call the
-> same R package, so they cannot disagree about results; pick whichever suits
-> the user. See `02_code/PythonGUI/README.md`.
+> A Python/Tkinter desktop window is also provided in `02_code/PythonGUI/`, and it
+> ships as a double-clickable `02_code/PythonGUI/dist/nanoamp.exe`. It is a native
+> window with no browser and no HTTP server, but it exposes fewer parameters.
+> Both front ends call the same R package, so they cannot disagree about
+> results; the choice between them depends on requirements. See
+> `02_code/PythonGUI/README.md`.
 
 ## Current implementation
 
@@ -50,9 +51,9 @@ For a double-clickable Windows installer:
 
 1. Build the R package on Windows;
 2. Use RInno to bundle R, the package and its dependencies into one installer;
-3. Bundle `minimap2.exe` if native speed is needed. `samtools.exe` is optional
+3. Bundle `minimap2.exe` if native speed is required. `samtools.exe` is optional
    because `Rsamtools` handles SAM to BAM conversion; the R-native backend
-   (`aligner = "r"`) needs no external tool at all;
+   (`aligner = "r"`) requires no external tool;
 4. Test on a clean Windows 10/11 machine without R installed.
 
 The RInno skeleton is in `inst/windows/build_installer.R`; it must be run on a

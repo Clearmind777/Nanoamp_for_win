@@ -1,8 +1,8 @@
 # CLI contract
 
-The CLI is implemented in R and shipped with the `nanoamp` R package. The
-Python CLI planned earlier has been cancelled; all CLI development targets the
-R implementation.
+The CLI is implemented in R and is part of the `nanoamp` R package. The Python
+CLI planned earlier has been cancelled; all CLI development targets the R
+implementation.
 
 ## Commands
 
@@ -33,9 +33,9 @@ nanoamp help
 | `--ref-label` | string | reference name | Reference label in outputs |
 | `--no-intermediates` | flag | false | Do not keep BAM files |
 
-## batch input
+## Batch input
 
-TSV with at least:
+A TSV file that contains at least:
 
 ```text
 sample	reads	reference
@@ -53,12 +53,12 @@ export PATH="$HOME/.local/bin:$PATH"
 nanoamp doctor
 ```
 
-The installed R package also ships an equivalent script at
+The installed R package also contains an equivalent script at
 `system.file("scripts", "install_cli.sh", package = "nanoamp")`.
 
 ### Windows
 
-After installing the R package, use one of:
+After installing the R package, the available options are:
 
 ```bat
 :: Install a wrapper
@@ -68,7 +68,7 @@ After installing the R package, use one of:
 02_code\cli\nanoamp.bat call --reads sample.fastq --reference target.fa --outdir results\sampleA
 ```
 
-You can also add a `nanoamp.cmd` wrapper to a directory on `PATH`:
+A `nanoamp.cmd` wrapper can also be placed in a directory on `PATH`:
 
 ```bat
 @echo off
@@ -84,7 +84,7 @@ Rscript --vanilla -e "library(nanoamp); nanoamp_cli()" %*
 ## External tools
 
 `minimap2` is resolved from `03_dependence/<os>-<arch>/bin/` first, then from
-`PATH`. On platforms without a minimap2 binary, use `--aligner r` to run the
+`PATH`. On platforms without a minimap2 binary, `--aligner r` selects the
 R-native pairwise alignment backend. samtools is optional: SAM -> BAM is
 handled by `Rsamtools` by default.
 

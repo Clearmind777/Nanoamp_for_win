@@ -10,9 +10,9 @@ Native Windows x86_64 support for nanoamp's external tools.
 | samtools | not bundled (not needed) | `Rsamtools::asBam()` handles SAM -> BAM by default |
 
 `minimap2.exe` is built from the upstream v2.31 source with the MSYS2
-MINGW-w64 toolchain. It is statically linked against libwinpthread and zlib,
-so it has **no MSYS2 runtime dependency** — it runs from a plain Windows shell
-on a machine with no MSYS2, Cygwin, conda or WSL installed:
+MINGW-w64 toolchain. It is statically linked against libwinpthread and zlib, so
+it has **no MSYS2 runtime dependency**: it runs from a plain Windows shell, on a
+machine without MSYS2, Cygwin, conda or WSL.
 
 ```text
 DLL Name: KERNEL32.dll
@@ -50,10 +50,10 @@ This script:
    `mingw-w64-x86_64-zlib`, `mingw-w64-x86_64-cmake`,
    `mingw-w64-x86_64-ninja`.
 
-It needs no administrator rights: the toolchain is a portable extraction, not
-an installer, and it lives outside the repository. A full toolchain is roughly
-1.5 GB, so it is deliberately **not** committed; the repository commits this
-recipe plus the resulting `minimap2.exe` (~1.3 MB).
+It requires no administrator rights: the toolchain is a portable extraction,
+not an installer, and it lives outside the repository. A full toolchain is
+roughly 1.5 GB, so it is not committed; the repository commits this recipe plus
+the resulting `minimap2.exe` (~1.3 MB).
 
 Verified toolchain versions:
 
@@ -70,7 +70,7 @@ bash 03_dependence/windows-x86_64/build_minimap2.sh
 ```
 
 This downloads minimap2 v2.31, builds it, and installs `minimap2.exe` into
-`bin/`. It prints `minimap2 --version` and the resulting DLL dependency list
+`bin/`. It prints `minimap2 --version` and the resulting DLL dependency list,
 so the static-link status is verifiable.
 
 ### Build flags that matter
@@ -105,6 +105,6 @@ runs with MSYS2 present, so it is not what this repository ships.
 ## samtools on Windows
 
 htslib officially supports Windows through MSYS2 MINGW64 and documents the
-build. You generally do not need it here: `Rsamtools::asBam()` is the default
-SAM -> BAM path and is pure R + Bioconductor. Only build samtools if you
-explicitly set `use_samtools = TRUE`.
+build. samtools is not required here: `Rsamtools::asBam()` is the default
+SAM -> BAM path and is pure R + Bioconductor. Build samtools only when
+`use_samtools = TRUE` is set explicitly.
