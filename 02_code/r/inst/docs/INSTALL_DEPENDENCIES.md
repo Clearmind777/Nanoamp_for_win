@@ -97,7 +97,7 @@ Required:
 
 ```r
 install.packages(c(
-  "Biostrings", "Rsamtools", "ShortRead", "IRanges", "Matrix",
+  "Biostrings", "Rsamtools", "IRanges", "Matrix",
   "data.table", "optparse", "jsonlite", "readxl"
 ))
 ```
@@ -106,7 +106,7 @@ If the Bioconductor packages are not available from CRAN:
 
 ```r
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install(c("Biostrings", "Rsamtools", "ShortRead", "IRanges"))
+BiocManager::install(c("Biostrings", "Rsamtools", "IRanges"))
 ```
 
 Optional:

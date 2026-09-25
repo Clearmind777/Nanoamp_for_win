@@ -89,7 +89,7 @@ BAM。只有显式设置 `use_samtools = TRUE` 时才需要 samtools，那就得
 
 ```r
 install.packages(c(
-  "Biostrings", "Rsamtools", "ShortRead", "IRanges", "Matrix",
+  "Biostrings", "Rsamtools", "IRanges", "Matrix",
   "data.table", "optparse", "jsonlite", "readxl"
 ))
 ```
@@ -98,7 +98,7 @@ install.packages(c(
 
 ```r
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install(c("Biostrings", "Rsamtools", "ShortRead", "IRanges"))
+BiocManager::install(c("Biostrings", "Rsamtools", "IRanges"))
 ```
 
 可选：
