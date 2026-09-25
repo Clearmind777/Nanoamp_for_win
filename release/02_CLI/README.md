@@ -119,8 +119,17 @@ nanoamp call ^
 | `--annotation-detail` | 关 | 额外写 `variants_annotation.tsv`（每个变异一行的后果） |
 | `--cache-dir <dir>` | 用户缓存目录 | 参考序列切片的缓存位置（等价于设 `NANOAMP_CACHE_DIR`） |
 | `--no-cache` | 关 | 本次不读也不写缓存（**不会删除缓存目录**，目录由并发运行共享） |
-| `--clear-cache` | — | 清空缓存目录后退出（不做分析） |
+| `--clear-cache` | — | 清空缓存目录后退出（不做分析，**不需要** `--reads`/`--reference`） |
 | `--strict` | 关 | 注释有转录本被跳过时**以非零状态退出**（默认只是记账，退出码仍为 0） |
+| `--min-ref-coverage` | 0.90 | read 至少要覆盖参考序列的多大比例（`aligner = "r"` 下按实际比对片段计算） |
+
+两个与缓存/网络有关的子命令：
+
+```bat
+nanoamp cache                  :: 打印 cache-dir / cache-size / cache-files
+nanoamp cache --clear          :: 清空缓存
+nanoamp doctor --check-online  :: 问一次 Ensembl 是否可用，不可用时退出码非 0
+```
 
 > `--annotate`（少了 `-config`）会被直接拒绝并提示正确写法；`--annotation-route`
 > 不存在（路线写在配置文件里）；`--ensembl-release` 未实现。

@@ -47,6 +47,27 @@ ANNOTATION_SOURCES = [ANNOTATION_OFFLINE, ANNOTATION_ONLINE, ANNOTATION_CUSTOM]
 # else Ensembl canonical). The rest are filled in by 「列出转录本」.
 TRANSCRIPT_AUTO = "自动选择（MANE / 规范）"
 
+# Advanced parameters. These mirror the defaults of the R layer (R/defaults.R):
+# the GUI only sends a flag when the user changed the value, so leaving the panel
+# untouched keeps the documented defaults exactly.
+ALIGNER_MINIMAP2 = "minimap2（默认，需内置比对程序）"
+ALIGNER_R = "r（纯 R 比对，无需外部程序）"
+ALIGNER_DEFAULT = ALIGNER_MINIMAP2
+ALIGNERS = [ALIGNER_MINIMAP2, ALIGNER_R]
+CONSENSUS_DECIPHER = "decipher（默认）"
+CONSENSUS_MEDOID = "medoid（不依赖 DECIPHER）"
+CONSENSUS_DEFAULT = CONSENSUS_DECIPHER
+CONSENSUS_METHODS = [CONSENSUS_DECIPHER, CONSENSUS_MEDOID]
+ADVANCED_DEFAULTS = {
+    "threads": 4,
+    "min_reads": 3,
+    "min_freq": 0.02,
+    "min_identity": 0.90,
+    "min_ref_coverage": 0.90,
+    "identity_cutoff": 0.99,
+    "min_cluster_reads": 2,
+}
+
 # Kept in step with the geometry set in main(); used for label wrapping.
 WINDOW_WIDTH = 1040
 WINDOW_MIN_HEIGHT = 600
@@ -202,6 +223,33 @@ class NanoampApp(ttk.Frame):
         # re-render and so tests can assert on the parsed table.
         self.transcript_choices: list[str] = []
 
+        # advanced parameters (see _build_advanced_group). Defaults mirror the R
+        # defaults in R/defaults.R; only values that differ are sent to the CLI,
+        # so an untouched panel cannot change a result.
+        self.var_advanced_on = tk.BooleanVar(value=False)
+        self.var_aligner = tk.StringVar(value=ALIGNER_DEFAULT)
+        self.var_threads = tk.StringVar(value=str(ADVANCED_DEFAULTS["threads"]))
+        self.var_min_reads = tk.StringVar(value=str(ADVANCED_DEFAULTS["min_reads"]))
+        self.var_min_freq = tk.StringVar(value=str(ADVANCED_DEFAULTS["min_freq"]))
+        self.var_min_identity = tk.StringVar(value=str(ADVANCED_DEFAULTS["min_identity"]))
+        self.var_min_coverage = tk.StringVar(value=str(ADVANCED_DEFAULTS["min_ref_coverage"]))
+        self.var_identity_cutoff = tk.StringVar(value=str(ADVANCED_DEFAULTS["identity_cutoff"]))
+        self.var_min_cluster_reads = tk.StringVar(value=str(ADVANCED_DEFAULTS["min_cluster_reads"]))
+        self.var_consensus_method = tk.StringVar(value=CONSENSUS_DEFAULT)
+        self.var_keep_intermediates = tk.BooleanVar(value=True)
+        self.var_advanced_hint = tk.StringVar(value="")
+
+        # cache/network row (annotation panel): filled by the `cache` subcommand
+        self.var_cache_info = tk.StringVar(value="缓存：未查询（点“刷新”）")
+        self.var_online_status = tk.StringVar(value="在线路线：未测试")
+
+        # results of the last annotation load, used by the haplotype filter (E7)
+        # and the protein view (G9)
+        self.annotation_records: list[dict[str, str]] = []
+        self.variant_records: list[dict[str, str]] = []
+        self.annot_filter: str | None = None
+        self._annot_displayed: dict[str, dict[str, str]] = {}
+
         self._build_layout()
         self._detect_environment()
         self.after(100, self._drain_log_queue)
@@ -209,7 +257,7 @@ class NanoampApp(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_layout(self) -> None:
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        self.rowconfigure(4, weight=1)
 
         # -- title
         header = ttk.Frame(self)
@@ -261,13 +309,26 @@ class NanoampApp(ttk.Frame):
         # annotation is off - without this the panel could never be reached.
         ttk.Checkbutton(opts, text="功能注释…",
                         variable=self.var_annot_on).pack(side="left", padx=(16, 0))
+        # Advanced parameters are off by default: the defaults are what the
+        # documentation and the baselines describe, and the panel would otherwise
+        # push the result tables out of the window.
+        ttk.Checkbutton(opts, text="高级参数…",
+                        variable=self.var_advanced_on).pack(side="left", padx=(10, 0))
+
+        # -- optional panels (advanced parameters, functional annotation)
+        # Each panel owns a row of its own, so grid_remove() collapses that row
+        # when the panel is off. (Stacking them in one container looked tidier
+        # but Tk kept the container's requested height after the panels were
+        # removed, leaving ~320 px of empty space.)
+        # -- advanced parameters (optional, off by default)
+        self._build_advanced_group()
 
         # -- functional annotation (optional, off by default)
         self._build_annotation_group()
 
         # -- results
         nb = ttk.Notebook(self)
-        nb.grid(row=3, column=0, sticky="nsew", pady=8)
+        nb.grid(row=4, column=0, sticky="nsew", pady=8)
         self.notebook = nb
         self._build_haplotype_tab(nb)
         self._build_annotation_tab(nb)
@@ -278,8 +339,8 @@ class NanoampApp(ttk.Frame):
 
         # -- actions
         actions = ttk.Frame(self)
-        actions.grid(row=4, column=0, sticky="ew")
-        actions.columnconfigure(5, weight=1)
+        actions.grid(row=5, column=0, sticky="ew")
+        actions.columnconfigure(6, weight=1)
 
         self.btn_run = ttk.Button(actions, text="开始分析", command=self._on_run)
         self.btn_run.grid(row=0, column=0)
@@ -293,18 +354,182 @@ class NanoampApp(ttk.Frame):
         # Enabled only while R is running; stops the analysis.
         self.btn_cancel = ttk.Button(actions, text="取消操作", command=self._on_cancel,
                                      state="disabled")
-        self.btn_cancel.grid(row=0, column=2, padx=(6, 0), sticky="w")
+        self.btn_cancel.grid(row=0, column=3, padx=(6, 0))
         self.btn_open = ttk.Button(
             actions, text="打开输出目录", command=self._on_open_outdir, state="disabled"
         )
-        self.btn_open.grid(row=0, column=3, padx=(6, 0))
+        self.btn_open.grid(row=0, column=4, padx=(6, 0))
 
         self.progress = ttk.Progressbar(actions, mode="indeterminate", length=140)
-        self.progress.grid(row=0, column=4, padx=(12, 0))
+        self.progress.grid(row=0, column=5, padx=(12, 0))
 
         status = ttk.Label(self, textvariable=self.var_status, anchor="w", foreground="#333333")
-        status.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        status.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self.status_label = status
+
+    # ------------------------------------------------- advanced parameters
+    def _build_advanced_group(self) -> None:
+        """Optional alignment/threshold overrides (plan item G10).
+
+        Every field starts at the R layer's own default; `_advanced_args()` sends
+        a flag only for values the user actually changed, so an untouched panel is
+        indistinguishable from not having it.
+        """
+        box = ttk.Frame(self, padding=(10, 4, 10, 0))
+        self._advanced_box = box
+        box.grid(row=2, column=0, sticky="ew")
+        ttk.Label(box, text="高级参数", foreground="#333333").grid(
+            row=0, column=0, sticky="w", columnspan=4)
+
+        row1 = ttk.Frame(box)
+        row1.grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 0))
+        self._advanced_row1 = row1
+        ttk.Label(row1, text="比对方式").pack(side="left")
+        self.box_aligner = ttk.Combobox(row1, state="readonly", width=26,
+                                        values=ALIGNERS, textvariable=self.var_aligner)
+        self.box_aligner.pack(side="left", padx=(6, 14))
+        ttk.Label(row1, text="线程").pack(side="left")
+        self.entry_threads = ttk.Entry(row1, width=6, textvariable=self.var_threads)
+        self.entry_threads.pack(side="left", padx=(4, 14))
+        ttk.Label(row1, text="簇共识").pack(side="left")
+        self.box_consensus = ttk.Combobox(
+            row1, state="readonly", width=20, values=CONSENSUS_METHODS,
+            textvariable=self.var_consensus_method)
+        self.box_consensus.pack(side="left", padx=(4, 14))
+        self.chk_keep_intermediates = ttk.Checkbutton(
+            row1, text="保留 BAM 等中间文件", variable=self.var_keep_intermediates)
+        self.chk_keep_intermediates.pack(side="left")
+
+        row2 = ttk.Frame(box)
+        row2.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self._advanced_row2 = row2
+
+        def field(parent, label, var, width=6):
+            ttk.Label(parent, text=label).pack(side="left")
+            entry = ttk.Entry(parent, width=width, textvariable=var)
+            entry.pack(side="left", padx=(4, 12))
+            return entry
+
+        self.entry_min_reads = field(row2, "最小支持 reads", self.var_min_reads)
+        self.entry_min_freq = field(row2, "最小频率", self.var_min_freq, 7)
+        self.entry_min_identity = field(row2, "最小一致度", self.var_min_identity, 7)
+        self.entry_min_coverage = field(row2, "最小覆盖", self.var_min_coverage, 7)
+
+        row3 = ttk.Frame(box)
+        row3.grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self._advanced_row3 = row3
+        self.entry_identity_cutoff = field(row3, "聚类一致度", self.var_identity_cutoff, 7)
+        self.entry_min_cluster_reads = field(row3, "最小簇 reads", self.var_min_cluster_reads)
+        self.btn_advanced_reset = ttk.Button(row3, text="恢复默认值",
+                                             command=self._reset_advanced)
+        self.btn_advanced_reset.pack(side="left", padx=(2, 10))
+        ttk.Label(row3, textvariable=self.var_advanced_hint,
+                  foreground="#7a5c00").pack(side="left")
+        self._advanced_row4 = row3
+
+        self._advanced_hidden = [box]
+        for var in (self.var_advanced_on, self.var_aligner, self.var_threads,
+                    self.var_min_reads, self.var_min_freq, self.var_min_identity,
+                    self.var_min_coverage, self.var_identity_cutoff,
+                    self.var_min_cluster_reads, self.var_consensus_method,
+                    self.var_keep_intermediates):
+            var.trace_add("write", lambda *_: self._sync_advanced_state())
+        self._sync_advanced_state()
+
+    def _advanced_widgets(self) -> list:
+        return [self.box_aligner, self.entry_threads, self.entry_min_reads,
+                self.entry_min_freq, self.entry_min_identity, self.entry_min_coverage,
+                self.entry_identity_cutoff, self.entry_min_cluster_reads,
+                self.box_consensus, self.chk_keep_intermediates,
+                self.btn_advanced_reset]
+
+    def _sync_advanced_state(self) -> None:
+        on = bool(self.var_advanced_on.get())
+        # pack/pack_forget (not grid/grid_remove): inside a stacked container Tk
+        # keeps the grid row's size after grid_remove, which left ~320 px of empty
+        # space once the panel had ever been shown.
+        for widget in self._advanced_hidden:
+            if on:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        for widget in self._advanced_widgets():
+            state = "normal" if on else "disabled"
+            if isinstance(widget, ttk.Combobox):
+                state = "readonly" if on else "disabled"
+            widget.configure(state=state)
+        if not on:
+            self.var_advanced_hint.set("")
+            return
+        self.var_advanced_hint.set(
+            "只把改动过的参数传给命令行；未改动的沿用默认值。")
+        self._grow_to_fit()
+        try:
+            self.after_idle(self._grow_to_fit)
+        except tk.TclError:
+            pass
+
+    def _reset_advanced(self) -> None:
+        self.var_aligner.set(ALIGNER_DEFAULT)
+        self.var_threads.set(str(ADVANCED_DEFAULTS["threads"]))
+        self.var_min_reads.set(str(ADVANCED_DEFAULTS["min_reads"]))
+        self.var_min_freq.set(str(ADVANCED_DEFAULTS["min_freq"]))
+        self.var_min_identity.set(str(ADVANCED_DEFAULTS["min_identity"]))
+        self.var_min_coverage.set(str(ADVANCED_DEFAULTS["min_ref_coverage"]))
+        self.var_identity_cutoff.set(str(ADVANCED_DEFAULTS["identity_cutoff"]))
+        self.var_min_cluster_reads.set(str(ADVANCED_DEFAULTS["min_cluster_reads"]))
+        self.var_consensus_method.set(CONSENSUS_DEFAULT)
+        self.var_keep_intermediates.set(True)
+
+    def advanced_problem(self) -> str:
+        """A human-readable problem with the advanced fields, or ""."""
+        checks = [
+            ("线程", self.var_threads.get(), int, 1, 256),
+            ("最小支持 reads", self.var_min_reads.get(), int, 1, 10 ** 6),
+            ("最小频率", self.var_min_freq.get(), float, 0.0, 1.0),
+            ("最小一致度", self.var_min_identity.get(), float, 0.0, 1.0),
+            ("最小覆盖", self.var_min_coverage.get(), float, 0.0, 1.0),
+            ("聚类一致度", self.var_identity_cutoff.get(), float, 0.0, 1.0),
+            ("最小簇 reads", self.var_min_cluster_reads.get(), int, 1, 10 ** 6),
+        ]
+        for label, text, cast, low, high in checks:
+            try:
+                value = cast(str(text).strip())
+            except (TypeError, ValueError):
+                return f"{label} 不是有效数字：{text!r}"
+            if not (low <= value <= high):
+                return f"{label} 应在 {low}–{high} 之间（当前 {value}）"
+        return ""
+
+    def _advanced_args(self) -> list[str]:
+        """CLI flags for the values that differ from the R defaults."""
+        if not self.var_advanced_on.get() or self.advanced_problem():
+            return []
+        args: list[str] = []
+        if self.var_aligner.get() != ALIGNER_DEFAULT:
+            args += ["--aligner", "r"]
+        if not self.var_keep_intermediates.get():
+            args.append("--no-intermediates")
+        mapping = [
+            ("--threads", self.var_threads.get(), ADVANCED_DEFAULTS["threads"], int),
+            ("--min-reads", self.var_min_reads.get(), ADVANCED_DEFAULTS["min_reads"], int),
+            ("--min-freq", self.var_min_freq.get(), ADVANCED_DEFAULTS["min_freq"], float),
+            ("--min-identity", self.var_min_identity.get(),
+             ADVANCED_DEFAULTS["min_identity"], float),
+            ("--min-ref-coverage", self.var_min_coverage.get(),
+             ADVANCED_DEFAULTS["min_ref_coverage"], float),
+            ("--identity-cutoff", self.var_identity_cutoff.get(),
+             ADVANCED_DEFAULTS["identity_cutoff"], float),
+            ("--min-cluster-reads", self.var_min_cluster_reads.get(),
+             ADVANCED_DEFAULTS["min_cluster_reads"], int),
+        ]
+        for flag, text, default, cast in mapping:
+            value = cast(str(text).strip())
+            if value != cast(default):
+                args += [flag, str(value)]
+        if self.var_consensus_method.get() != CONSENSUS_DEFAULT:
+            args += ["--consensus-method", "medoid"]
+        return args
 
     # ------------------------------------------------- functional annotation
     def _build_annotation_group(self) -> None:
@@ -316,9 +541,9 @@ class NanoampApp(ttk.Frame):
         and fetches the transcript structure from Ensembl.
         """
         box = ttk.Frame(self, padding=(10, 4, 10, 0))
-        box.grid(row=2, column=0, sticky="ew")
         box.columnconfigure(1, weight=1)
         self._annotation_box = box
+        box.grid(row=3, column=0, sticky="ew")
         ttk.Label(box, text="功能注释", foreground="#333333").grid(
             row=0, column=0, sticky="w")
 
@@ -380,6 +605,26 @@ class NanoampApp(ttk.Frame):
                                         foreground="#7a5c00",
                                         wraplength=WINDOW_WIDTH - 90, justify="left")
         self.lbl_annot_hint.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        # Cache / network (plan item G7). Only the online route uses the cache and
+        # the network, which is why this row lives in the annotation panel.
+        cache_row = ttk.Frame(box)
+        cache_row.grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self._annot_cache_row = cache_row
+        ttk.Label(cache_row, text="缓存").pack(side="left")
+        ttk.Label(cache_row, textvariable=self.var_cache_info,
+                  foreground="#555555").pack(side="left", padx=(6, 8))
+        self.btn_cache_refresh = ttk.Button(cache_row, text="刷新",
+                                            command=self._on_cache_refresh)
+        self.btn_cache_refresh.pack(side="left")
+        self.btn_cache_clear = ttk.Button(cache_row, text="清空缓存",
+                                          command=self._on_cache_clear)
+        self.btn_cache_clear.pack(side="left", padx=(6, 0))
+        self.btn_online_test = ttk.Button(cache_row, text="测试 Ensembl 连接",
+                                          command=self._on_online_test)
+        self.btn_online_test.pack(side="left", padx=(6, 0))
+        ttk.Label(cache_row, textvariable=self.var_online_status,
+                  foreground="#555555").pack(side="left", padx=(8, 0))
         # The whole panel is hidden while annotation is off: the default window
         # is 720 px tall and must keep the results area and buttons in view.
         self._annot_hidden = [box]
@@ -392,7 +637,8 @@ class NanoampApp(ttk.Frame):
     def _annotation_widgets(self) -> list:
         return [self.entry_cds_start, self.entry_cds_end, self.box_cds_strand,
                 self.box_cds_frame, self.btn_annot_browse,
-                self.box_annot_transcript, self.btn_list_transcripts]
+                self.box_annot_transcript, self.btn_list_transcripts,
+                self.btn_cache_refresh, self.btn_cache_clear, self.btn_online_test]
 
     def _sync_annotation_state(self) -> None:
         """Show/hide the optional rows, enable/disable, keep the hint in sync."""
@@ -400,6 +646,7 @@ class NanoampApp(ttk.Frame):
         source = self.var_annot_source.get()
         offline = source == ANNOTATION_OFFLINE
 
+        # See _sync_advanced_state: this container stacks its panels with pack.
         for widget in self._annot_hidden:
             if on:
                 widget.grid()
@@ -619,7 +866,10 @@ class NanoampApp(ttk.Frame):
         nb.add(frame, text="QC 指标")
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
-        self.qc_text = tk.Text(frame, wrap="none", font=("Consolas", 10))
+        # A fixed height (in lines) keeps the tab's requested size independent of
+        # how many metrics there are: the text scrolls instead of pushing the
+        # window taller as QC rows are added.
+        self.qc_text = tk.Text(frame, wrap="none", font=("Consolas", 10), height=12)
         self.qc_text.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(frame, orient="vertical", command=self.qc_text.yview)
         sb.grid(row=0, column=1, sticky="ns")
@@ -646,7 +896,9 @@ class NanoampApp(ttk.Frame):
         nb.add(frame, text="运行日志")
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
-        self.log_text = tk.Text(frame, wrap="none", font=("Consolas", 9))
+        # Fixed height for the same reason as qc_text: the log must not make the
+        # window grow as lines arrive.
+        self.log_text = tk.Text(frame, wrap="none", font=("Consolas", 9), height=12)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(frame, orient="vertical", command=self.log_text.yview)
         sb.grid(row=0, column=1, sticky="ns")
@@ -676,7 +928,7 @@ class NanoampApp(ttk.Frame):
         widths = {"haplotype_id": 65, "transcript_id": 145, "consequence_zh": 85,
                   "consequence_any_transcript_zh": 95, "transcript_conflict": 85,
                   "protein_change": 120, "variants": 185}
-        self.annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=8)
+        self.annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=5)
         for c in cols:
             self.annot_tree.heading(c, text=heads[c])
             self.annot_tree.column(c, width=widths[c],
@@ -687,6 +939,28 @@ class NanoampApp(ttk.Frame):
         self.annot_tree.configure(yscrollcommand=sb.set)
         # Selecting a haplotype here highlights the same row in the other tabs.
         self.annot_tree.bind("<<TreeviewSelect>>", self._on_select_annotation)
+
+        # Filter + protein view (plan items E7 and G9). Selecting a haplotype in
+        # the main tab narrows this table to that haplotype; the button restores
+        # the full table, and the label always says which of the two is shown.
+        filter_row = ttk.Frame(frame)
+        filter_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.var_annot_filter = tk.StringVar(value="")
+        ttk.Label(filter_row, textvariable=self.var_annot_filter,
+                  foreground="#555555").pack(side="left")
+        self.btn_annot_show_all = ttk.Button(filter_row, text="显示全部",
+                                             command=self._clear_annot_filter)
+        self.btn_annot_show_all.pack(side="left", padx=(8, 0))
+        # The protein sequence opens in its own window: proteins are long, and a
+        # box inside the tab would squeeze the consequence table on a short
+        # screen (measured: 15 px left for the table with every panel open).
+        self.btn_annot_protein = ttk.Button(filter_row, text="查看蛋白序列…",
+                                            command=self._open_protein_view)
+        self.btn_annot_protein.pack(side="left", padx=(8, 0))
+        ttk.Label(frame,
+                  text="双击一行或点「查看蛋白序列…」（需要勾选「输出蛋白序列」重跑）。",
+                  foreground="#777777").grid(row=3, column=0, columnspan=2, sticky="w")
+        self.annot_tree.bind("<Double-1>", lambda _e: self._open_protein_view())
 
     def _build_variant_annotation_tab(self, nb: ttk.Notebook) -> None:
         """Per-variant consequences (variants_annotation.tsv)."""
@@ -709,7 +983,7 @@ class NanoampApp(ttk.Frame):
             "codon_ref": "原密码子", "codon_alt": "新密码子",
             "aa_ref": "原氨基酸", "aa_alt": "新氨基酸", "consequence_zh": "后果",
         }
-        self.var_annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=8)
+        self.var_annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=5)
         for c in cols:
             self.var_annot_tree.heading(c, text=heads[c])
             self.var_annot_tree.column(c, width=82, anchor="center")
@@ -717,6 +991,15 @@ class NanoampApp(ttk.Frame):
         sb = ttk.Scrollbar(frame, orient="vertical", command=self.var_annot_tree.yview)
         sb.grid(row=1, column=1, sticky="ns")
         self.var_annot_tree.configure(yscrollcommand=sb.set)
+
+        filter_row = ttk.Frame(frame)
+        filter_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.var_variant_filter = tk.StringVar(value="")
+        ttk.Label(filter_row, textvariable=self.var_variant_filter,
+                  foreground="#555555").pack(side="left")
+        self.btn_variant_show_all = ttk.Button(filter_row, text="显示全部",
+                                               command=self._clear_annot_filter)
+        self.btn_variant_show_all.pack(side="left", padx=(8, 0))
 
     # -------------------------------------------------------- environment
     def _detect_environment(self) -> None:
@@ -785,6 +1068,11 @@ class NanoampApp(ttk.Frame):
         if annot_problem:
             messagebox.showwarning("注释配置不完整", annot_problem)
             return
+        if self.var_advanced_on.get():
+            adv_problem = self.advanced_problem()
+            if adv_problem:
+                messagebox.showwarning("高级参数有误", adv_problem)
+                return
         mode = self.var_mode.get()
         if annot_cfg is not None and mode == "C":
             messagebox.showinfo(
@@ -802,6 +1090,7 @@ class NanoampApp(ttk.Frame):
             "--mode", mode,
             "--top-n", str(self.var_topn.get()),
         ]
+        argv += self._advanced_args()
         if annot_cfg is not None:
             argv += ["--annotate-config", str(annot_cfg)]
             transcript = self._selected_transcript_id()
@@ -935,6 +1224,89 @@ class NanoampApp(ttk.Frame):
         _fields, rows, error = NanoampApp._read_tsv_safe(path)
         return [] if error else rows
 
+    def _on_cache_refresh(self) -> None:
+        self._run_quick("__cache_done__", ["cache"])
+
+    def _on_cache_clear(self) -> None:
+        """Empty the shared cache after asking; never deletes anything else."""
+        answer = messagebox.askyesno(
+            "清空注释缓存",
+            "确定要清空参考序列缓存吗？\n\n"
+            "缓存里只有可以从 Ensembl 重新下载的参考序列/转录本数据，"
+            "你的分析结果不受影响；下次在线注释会重新下载。",
+        )
+        if not answer:
+            return
+        self._run_quick("__cache_done__", ["cache", "--clear"])
+
+    def _on_online_test(self) -> None:
+        """Ask R whether Ensembl is reachable right now."""
+        self._run_quick("__online_done__", ["doctor", "--check-online"])
+
+    def _run_quick(self, kind: str, argv: list[str]) -> None:
+        """Run a short CLI command (cache/online probe) in the background."""
+        if self.worker and self.worker.is_alive():
+            return
+        if self.runner is None:
+            try:
+                self.runner = NanoampRunner(self.repo_root)
+            except RNotFoundError as exc:
+                messagebox.showerror("R 不可用", str(exc))
+                return
+        self._cancel_requested = False
+        self._set_running(True)
+        self._append_log("")
+        self._append_log("$ nanoamp " + " ".join(argv))
+        self.worker = threading.Thread(
+            target=self._quick_worker, args=(kind, argv), daemon=True
+        )
+        self.worker.start()
+
+    def _quick_worker(self, kind: str, argv: list[str]) -> None:
+        assert self.runner is not None
+        lines: list[str] = []
+        try:
+            code, lines = self.runner.run(argv, stream=self._emit)
+        except Exception:
+            self._emit(traceback.format_exc())
+            code = 1
+        self.log_queue.put((kind, code, lines))
+
+    def _finish_cache(self, code: int, lines: list[str]) -> None:
+        self._set_running(False)
+        if code != 0:
+            self.var_cache_info.set("缓存查询失败（见运行日志）")
+            self.var_status.set("缓存查询失败。详见运行日志。")
+            return
+        info: dict[str, str] = {}
+        for line in lines:
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0] in ("cache-dir", "cache-size", "cache-files"):
+                info[parts[0]] = parts[1].strip()
+        size = info.get("cache-size", "")
+        try:
+            size_txt = f"{int(size) / 1024 / 1024:.1f} MB" if int(size) else "0 MB"
+        except ValueError:
+            size_txt = size or "?"
+        self.var_cache_info.set(
+            f"{info.get('cache-dir', '?')}"
+            f"（{info.get('cache-files', '?')} 个文件，{size_txt}）"
+        )
+        self.var_status.set("缓存信息已更新。")
+
+    def _finish_online(self, code: int, lines: list[str]) -> None:
+        self._set_running(False)
+        detail = next((ln.strip() for ln in lines if ln.strip().startswith("online")), "")
+        if code == 0:
+            self.var_online_status.set("在线路线：可用" + (f"（{detail}）" if detail else ""))
+            self.var_status.set("Ensembl 可访问，在线注释可用。")
+        else:
+            self.var_online_status.set("在线路线：不可用")
+            self.var_status.set(
+                "Ensembl 不可访问：详见运行日志。离线 CDS 路线不受影响。")
+        if detail:
+            self._append_log("[GUI] " + detail)
+
     def _on_open_outdir(self) -> None:
         if not self.last_outdir or not self.last_outdir.is_dir():
             return
@@ -1007,11 +1379,15 @@ class NanoampApp(ttk.Frame):
             while True:
                 item = self.log_queue.get_nowait()
                 if isinstance(item, tuple):
-                    kind, code, outdir = item
+                    kind, code, payload = item
                     if kind == "__done__":
-                        self._finish_run(code, outdir)
+                        self._finish_run(code, payload)
                     elif kind == "__transcripts_done__":
-                        self._finish_transcripts(code, outdir)
+                        self._finish_transcripts(code, payload)
+                    elif kind == "__cache_done__":
+                        self._finish_cache(code, payload or [])
+                    elif kind == "__online_done__":
+                        self._finish_online(code, payload or [])
                     else:
                         self._finish_doctor(code)
                 else:
@@ -1279,17 +1655,12 @@ class NanoampApp(ttk.Frame):
                 self._append_log(f"[GUI] {self.annot_status.get()}")
                 self.var_annot_status.set("annotation.tsv 无法读取。")
                 return
-            for r in rows:
-                conflict = self._cell(r, "transcript_conflict")
-                self._insert_row(
-                    self.annot_tree,
-                    f"{self._cell(r, 'haplotype_id')}|{self._cell(r, 'transcript_id')}",
-                    (self._cell(r, "haplotype_id"), self._cell(r, "transcript_id"),
-                     self._cell(r, "consequence_zh"),
-                     self._cell(r, "consequence_any_transcript_zh"),
-                     {"TRUE": "是", "FALSE": "否"}.get(conflict.upper(), conflict),
-                     self._cell(r, "protein_change"), self._cell(r, "variants")),
-                )
+        # Kept so the table can be re-rendered under a haplotype filter without
+        # re-reading the file, and so the protein view has the full row.
+        self.annotation_records = rows
+        self.annot_filter = None
+        self._render_annotation_rows()
+
         n_ann = qc.get("n_transcripts_annotated", "")
         n_skip = qc.get("n_transcripts_skipped", "")
         n_hap = qc.get("n_haplotypes_annotated", "")
@@ -1305,22 +1676,15 @@ class NanoampApp(ttk.Frame):
                 f"共 {len(rows)} 行后果。")
         self._append_log("[GUI] " + self.annot_status.get())
 
+        self.variant_records = []
         if detail_path.is_file():
             _f, drows, det_error = self._read_tsv_safe(detail_path)
             if det_error:
                 self.var_annot_status.set(
                     f"variants_annotation.tsv 不符合契约，无法显示：{det_error}")
             else:
-                for r in drows:
-                    self._insert_row(
-                        self.var_annot_tree, None,
-                        (self._cell(r, "haplotype_id"), self._cell(r, "type"),
-                         self._cell(r, "genome_pos"), self._cell(r, "cds_pos"),
-                         self._cell(r, "ref"), self._cell(r, "alt"),
-                         self._cell(r, "codon_ref"), self._cell(r, "codon_alt"),
-                         self._cell(r, "aa_ref"), self._cell(r, "aa_alt"),
-                         self._cell(r, "consequence_zh")),
-                    )
+                self.variant_records = drows
+                self._render_variant_annotation_rows()
                 self.var_annot_status.set(f"{len(drows)} 条变异级后果。")
         elif self.var_annot_detail.get():
             self.var_annot_status.set(
@@ -1329,11 +1693,144 @@ class NanoampApp(ttk.Frame):
         else:
             self.var_annot_status.set("未请求变异级明细（勾选后重跑即可生成）。")
 
+    def _render_annotation_rows(self) -> None:
+        """Draw annotation.tsv rows, honouring the haplotype filter (E7)."""
+        for item in self.annot_tree.get_children():
+            self.annot_tree.delete(item)
+        self._annot_displayed: dict[str, dict] = {}
+        records = getattr(self, "annotation_records", []) or []
+        shown = 0
+        for r in records:
+            hid = self._cell(r, "haplotype_id")
+            if self.annot_filter and hid != self.annot_filter:
+                continue
+            conflict = self._cell(r, "transcript_conflict")
+            iid = f"{hid}|{self._cell(r, 'transcript_id')}"
+            self._insert_row(
+                self.annot_tree, iid,
+                (hid, self._cell(r, "transcript_id"),
+                 self._cell(r, "consequence_zh"),
+                 self._cell(r, "consequence_any_transcript_zh"),
+                 {"TRUE": "是", "FALSE": "否"}.get(conflict.upper(), conflict),
+                 self._cell(r, "protein_change"), self._cell(r, "variants")),
+            )
+            self._annot_displayed[iid] = r
+            shown += 1
+        if self.annot_filter:
+            self.var_annot_filter.set(
+                f"仅显示 {self.annot_filter}（{shown} / {len(records)} 行）；"
+                "点「显示全部」恢复。")
+        else:
+            self.var_annot_filter.set(f"显示全部 {len(records)} 行。")
+
+    def _render_variant_annotation_rows(self) -> None:
+        """Draw variants_annotation.tsv rows, honouring the same filter (E7)."""
+        for item in self.var_annot_tree.get_children():
+            self.var_annot_tree.delete(item)
+        records = getattr(self, "variant_records", []) or []
+        shown = 0
+        for r in records:
+            hid = self._cell(r, "haplotype_id")
+            if self.annot_filter and hid != self.annot_filter:
+                continue
+            self._insert_row(
+                self.var_annot_tree, None,
+                (hid, self._cell(r, "type"),
+                 self._cell(r, "genome_pos"), self._cell(r, "cds_pos"),
+                 self._cell(r, "ref"), self._cell(r, "alt"),
+                 self._cell(r, "codon_ref"), self._cell(r, "codon_alt"),
+                 self._cell(r, "aa_ref"), self._cell(r, "aa_alt"),
+                 self._cell(r, "consequence_zh")),
+            )
+            shown += 1
+        if self.annot_filter:
+            self.var_variant_filter.set(
+                f"仅显示 {self.annot_filter}（{shown} / {len(records)} 行）；"
+                "点「显示全部」恢复。")
+        else:
+            self.var_variant_filter.set(f"显示全部 {len(records)} 行。")
+
+    def _set_annot_filter(self, haplotype_id: str | None) -> None:
+        """Narrow the annotation tabs to one haplotype (or clear the filter)."""
+        self.annot_filter = haplotype_id or None
+        self._render_annotation_rows()
+        self._render_variant_annotation_rows()
+        if self.annot_filter:
+            total = len(getattr(self, "annotation_records", []) or [])
+            self.var_annot_filter.set(
+                f"仅显示 {self.annot_filter}"
+                f"（{len(self.annot_tree.get_children())} / {total} 行）；"
+                "点「显示全部」恢复。")
+
+    def _clear_annot_filter(self) -> None:
+        self._set_annot_filter(None)
+
+    def _show_protein(self, iid: str) -> None:
+        """Remember which row the protein view would show (used by the dialog)."""
+        self._protein_iid = iid
+
+    def _protein_text(self, iid: str) -> str:
+        """Text for the protein window: both sequences, or how to get them."""
+        row = (getattr(self, "_annot_displayed", {}) or {}).get(iid, {})
+        ref = self._cell(row, "ref_protein")
+        alt = self._cell(row, "alt_protein")
+        if not ref and not alt:
+            return ("这一行没有蛋白序列：重跑时勾选「输出蛋白序列」"
+                    "（或命令行加 --annotation-proteins）即可生成。\n\n"
+                    "蛋白序列很长，所以只在这里按需显示，不占结果表的位置。")
+        hid = self._cell(row, "haplotype_id")
+        tid = self._cell(row, "transcript_id")
+        change = self._cell(row, "protein_change")
+        head = f"{hid} / {tid}    {change}\n"
+        if ref == alt:
+            return head + f"参考与突变蛋白相同（{len(ref)} aa）：\n{ref}"
+        return (head
+                + f"参考蛋白（{len(ref)} aa）：\n{ref}\n\n"
+                + f"突变蛋白（{len(alt)} aa）：\n{alt}")
+
+    def _open_protein_view(self) -> None:
+        """Open the protein sequence(s) of the selected row in a window."""
+        sel = self.annot_tree.selection()
+        if not sel:
+            messagebox.showinfo("先选一行", "请先在「注释结果」里选中一行。")
+            return
+        iid = str(sel[0])
+        text = self._protein_text(iid)
+        win = tk.Toplevel(self)
+        win.title(f"蛋白序列 - {iid.split('|')[0]}")
+        win.geometry("720x360")
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(0, weight=1)
+        box = tk.Text(win, wrap="char", font=("Consolas", 9))
+        box.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
+        sb = ttk.Scrollbar(win, orient="vertical", command=box.yview)
+        sb.grid(row=0, column=1, sticky="ns", pady=8)
+        box.configure(yscrollcommand=sb.set)
+        box.insert("1.0", text)
+        box.configure(state="disabled")
+
+        btns = ttk.Frame(win)
+        btns.grid(row=1, column=0, columnspan=2, sticky="e", padx=8, pady=(0, 8))
+
+        def copy() -> None:
+            try:
+                win.clipboard_clear()
+                win.clipboard_append(text)
+            except tk.TclError:
+                return
+            self.var_status.set("蛋白序列已复制到剪贴板。")
+
+        ttk.Button(btns, text="复制", command=copy).pack(side="left")
+        ttk.Button(btns, text="关闭", command=win.destroy).pack(side="left", padx=(6, 0))
+        # Keep a reference so tests (and the WM) can see the window exists.
+        self.protein_window = win
+
     def _on_select_annotation(self, _event) -> None:
         """Selecting an annotation row also selects the haplotype elsewhere."""
         sel = self.annot_tree.selection()
         if not sel:
             return
+        self._show_protein(str(sel[0]))
         hid = str(sel[0]).split("|", 1)[0]
         if hid in self.tree.get_children():
             self.tree.selection_set(hid)
@@ -1399,6 +1896,10 @@ class NanoampApp(ttk.Frame):
         if not sel or not self.last_outdir:
             return
         hid = sel[0]
+        # E7: picking a haplotype narrows the annotation tabs to that haplotype,
+        # so "what does H3 look like" is one click instead of a search.
+        if getattr(self, "annotation_records", None):
+            self._set_annot_filter(str(hid))
         if not self.fasta_cache:
             self.fasta_cache = self._load_fasta(self.last_outdir / "haplotypes.fasta")
         seq = self.fasta_cache.get(hid)

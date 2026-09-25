@@ -240,6 +240,14 @@ align_reads_r <- function(reads_path, reference_path, threads = 1L) {
         sum(nchar(ops$ref[ops$type == "del"])) +
         sum(nchar(ops$alt[ops$type == "ins"]))
     }
+    # L13 (Windows fix): the R backend used to claim every read spans the whole
+    # reference (`ref_span = ref$length`, `ref_cov = 1`, `identity = 1 - nm /
+    # ref$length`). A read covering only part of the amplicon was therefore
+    # reported as a full-length perfect match: it survived --min-ref-coverage
+    # (measured: an 80 bp read against a 160 bp reference passed a 0.99
+    # threshold) and was counted as the reference haplotype. The aligned subject
+    # sequence is what the read actually covers.
+    ref_span <- as.integer(nchar(gsub("-", "", s, fixed = TRUE)))
     aln_rows[[i]] <- data.table::data.table(
       read_id = fq$read_id[i],
       flag = ifelse(strand == "-", 16L, 0L),
@@ -251,10 +259,10 @@ align_reads_r <- function(reads_path, reference_path, threads = 1L) {
       cs = NA_character_,
       nm = as.integer(nm),
       strand = strand,
-      ref_span = ref$length,
-      identity = 1 - nm / ref$length,
-      ref_end = ref$length,
-      ref_cov = 1
+      ref_span = ref_span,
+      identity = 1 - nm / pmax(ref_span, 1L),
+      ref_end = ref_span,
+      ref_cov = pmin(ref_span / ref$length, 1)
     )
     if (nrow(ops) > 0) {
       ops[, read_id := fq$read_id[i]]

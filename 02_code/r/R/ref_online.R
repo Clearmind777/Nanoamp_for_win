@@ -74,12 +74,25 @@ annotation_cache_clear <- function() {
 
 # Size of the cache in bytes (0 when it does not exist); the GUI shows this.
 annotation_cache_size <- function() {
+  annotation_cache_info()$size
+}
+
+#' Cache directory, size and file count in one call
+#'
+#' `nanoamp cache` and the GUI's cache panel both need all three, and listing the
+#' directory once is cheaper than three separate walks.
+annotation_cache_info <- function() {
   d <- annotation_cache_dir()
-  if (!dir.exists(d)) return(0)
+  if (!dir.exists(d)) {
+    return(list(dir = d, size = 0, files = 0L))
+  }
   files <- list.files(d, recursive = TRUE, full.names = TRUE, all.files = TRUE)
   files <- files[file.exists(files) & !dir.exists(files)]
-  if (length(files) == 0) return(0)
-  sum(file.info(files)$size, na.rm = TRUE)
+  if (length(files) == 0) {
+    return(list(dir = d, size = 0, files = 0L))
+  }
+  list(dir = d, size = sum(file.info(files)$size, na.rm = TRUE),
+       files = length(files))
 }
 
 .annotation_cache_path <- function(kind, key, ext) {

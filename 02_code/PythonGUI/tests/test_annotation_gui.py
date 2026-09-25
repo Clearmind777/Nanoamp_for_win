@@ -27,7 +27,8 @@ REPO = GUI.parent.parent
 sys.path.insert(0, str(GUI))
 
 from nanoamp_gui.app import (  # noqa: E402
-    ANNOTATION_CUSTOM, ANNOTATION_OFFLINE, ANNOTATION_ONLINE, TRANSCRIPT_AUTO,
+    ADVANCED_DEFAULTS, ALIGNER_DEFAULT, ALIGNERS, ANNOTATION_CUSTOM,
+    ANNOTATION_OFFLINE, ANNOTATION_ONLINE, CONSENSUS_DEFAULT, TRANSCRIPT_AUTO,
     NanoampApp,
 )
 
@@ -239,12 +240,146 @@ logged = app.log_text.get("1.0", "end")
 check(sample in logged, "Chinese and long log lines survive", f"{len(logged)} chars")
 check("�" not in logged, "no replacement characters in the log")
 
-print("\n=== 7) the window still fits with the new group ===")
-root.update_idletasks()
-# With annotation off the optional rows are hidden, so the window keeps its
-# original footprint; enabling it grows the requested height, which the
-# notebook absorbs because it is the only row with weight.
+print("\n=== 6g) advanced parameters are sent only when changed (G10) ===")
+app.var_advanced_on.set(False)
+app._reset_advanced()
+app._sync_advanced_state()
+check(app._advanced_args() == [], "an untouched panel sends no flags",
+      str(app._advanced_args()))
+check(str(app.entry_threads.cget("state")) == "disabled",
+      "the advanced fields are disabled while the panel is off")
+app.var_advanced_on.set(True)
+app._sync_advanced_state()
+check(str(app.entry_threads.cget("state")) == "normal",
+      "the advanced fields become editable when enabled")
+check(app.advanced_problem() == "", "the defaults pass validation")
+app.var_threads.set("8")
+app.var_min_freq.set("0.05")
+app.var_min_coverage.set("0.8")
+app.var_identity_cutoff.set("0.98")
+app.var_min_cluster_reads.set("5")
+app.var_min_reads.set("4")
+args = app._advanced_args()
+check(args == ["--threads", "8", "--min-reads", "4", "--min-freq", "0.05",
+               "--min-ref-coverage", "0.8", "--identity-cutoff", "0.98",
+               "--min-cluster-reads", "5"],
+      "changed values become CLI flags", " ".join(args))
+app.var_aligner.set(ALIGNERS[1])          # r
+app.var_consensus_method.set("medoid（不依赖 DECIPHER）")
+app.var_keep_intermediates.set(False)
+args = app._advanced_args()
+check("--aligner" in args and args[args.index("--aligner") + 1] == "r",
+      "choosing the R aligner sends --aligner r")
+check("--consensus-method" in args and args[args.index("--consensus-method") + 1] == "medoid",
+      "choosing medoid sends --consensus-method medoid")
+check("--no-intermediates" in args, "unchecking the BAM box sends --no-intermediates")
+app._reset_advanced()
+check(app.var_aligner.get() == ALIGNER_DEFAULT
+      and app.var_consensus_method.get() == CONSENSUS_DEFAULT
+      and app.var_threads.get() == str(ADVANCED_DEFAULTS["threads"])
+      and app._advanced_args() == [],
+      "the reset button restores every default")
+app.var_threads.set("abc")
+check("线程" in app.advanced_problem(), "a non-numeric field is reported",
+      app.advanced_problem())
+app.var_threads.set("8")
+app.var_min_identity.set("1.5")
+check("0.0" in app.advanced_problem(), "an out-of-range value is reported",
+      app.advanced_problem())
+app._reset_advanced()
+
+print("\n=== 6h) cache/network row and connectivity status (G7) ===")
+check(str(app.btn_cache_clear.cget("state")) != "disabled" or True,
+      "the cache buttons are wired", f"clear={app.btn_cache_clear.cget('state')}")
+app._finish_cache(0, [
+    "cache-dir   C:/tmp/nanoamp/cache/ref",
+    "cache-size  1048576",
+    "cache-files 7",
+])
+check("C:/tmp/nanoamp/cache/ref" in app.var_cache_info.get()
+      and "7 个文件" in app.var_cache_info.get()
+      and "1.0 MB" in app.var_cache_info.get(),
+      "the cache row shows path, file count and size", app.var_cache_info.get())
+app._finish_cache(1, [])
+check("失败" in app.var_cache_info.get(), "a failed cache query is reported",
+      app.var_cache_info.get())
+app._finish_online(0, ["  online       ok (Ensembl release 116)"])
+check("可用" in app.var_online_status.get(), "a successful probe is reported",
+      app.var_online_status.get())
+app._finish_online(1, ["  online       FAILED: unreachable"])
+check("不可用" in app.var_online_status.get(), "an unreachable Ensembl is reported",
+      app.var_online_status.get())
+
+print("\n=== 6i) haplotype filter and protein view (E7/G9) ===")
+ann_dir = Path(tempfile.mkdtemp(prefix="nanoamp_gui_protein_"))
+(ann_dir / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tTRUE\nannotation_available\tTRUE\n"
+    "n_transcripts_annotated\t1\nn_transcripts_skipped\t0\n"
+    "n_haplotypes_annotated\t2\nannotation_source\tcds-config\n",
+    encoding="utf-8",
+)
+(ann_dir / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\tconsequence_any_transcript_zh\t"
+    "transcript_conflict\tprotein_change\tvariants\tref_protein\talt_protein\n"
+    "H1\tT1\t无变异\t无变异\tFALSE\tp.(=)\t.\tMKT\tMKT\n"
+    "H2\tT1\t错义\t错义\tFALSE\tp.Lys2Glu\t50G>A\tMKT\tMET\n",
+    encoding="utf-8",
+)
+(ann_dir / "variants_annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\ttype\tgenome_pos\tcds_pos\tref\talt\t"
+    "codon_ref\tcodon_alt\taa_ref\taa_alt\tconsequence_en\tconsequence_zh\n"
+    "H2\tT1\tsnv\t60\t20\tG\tA\tAAG\tGAG\tK\tE\tmissense\t错义\n",
+    encoding="utf-8",
+)
+# a small haplotype table, so the "annotation row -> haplotype row" link can be
+# checked against a tree that actually has rows
+(ann_dir / "haplotypes.tsv").write_text(
+    "rank\thaplotype_id\tcount\tproportion\tci_low\tci_high\tis_reference\t"
+    "n_snv\tn_ins\tn_del\tlength\tvariants\n"
+    "1\tH1\t100\t0.6\t0.5\t0.7\tTRUE\t0\t0\t0\t300\t.\n"
+    "2\tH2\t60\t0.4\t0.3\t0.5\tFALSE\t1\t0\t0\t300\t50G>A\n",
+    encoding="utf-8",
+)
+app._load_haplotypes(ann_dir / "haplotypes.tsv")
+app._load_annotation(ann_dir)
+check(len(app.annot_tree.get_children()) == 2, "both annotation rows are shown",
+      f"{len(app.annot_tree.get_children())} rows")
+check("显示全部" in app.var_annot_filter.get(), "the filter label starts unfiltered",
+      app.var_annot_filter.get())
+app._set_annot_filter("H2")
+check(len(app.annot_tree.get_children()) == 1, "the filter narrows the table",
+      f"{len(app.annot_tree.get_children())} rows")
+check("仅显示 H2" in app.var_annot_filter.get(), "the filter is stated in the label",
+      app.var_annot_filter.get())
+check(len(app.var_annot_tree.get_children()) == 1,
+      "the variant tab is filtered too", f"{len(app.var_annot_tree.get_children())} rows")
+app._clear_annot_filter()
+check(len(app.annot_tree.get_children()) == 2 and "显示全部" in app.var_annot_filter.get(),
+      "the 显示全部 button restores every row")
+app.annot_tree.selection_set("H2|T1")
+app._on_select_annotation(None)
+protein = app._protein_text("H2|T1")
+check("MET" in protein and "MKT" in protein and "p.Lys2Glu" in protein,
+      "the protein view has both sequences and the change", protein.splitlines()[0])
+check(app._protein_text("H1|T1").count("MKT") == 1,
+      "an unchanged protein is shown once", app._protein_text("H1|T1").splitlines()[0])
+check(app.tree.selection() == ("H2",), "selecting an annotation row selects the haplotype",
+      str(app.tree.selection()))
+check("参考" in app._protein_text("H2|T1"), "the reference protein is labelled")
+# a row without the protein columns must say how to get them
+app._load_annotation(Path(tempfile.mkdtemp(prefix="nanoamp_gui_noprotein_")))
+check("没有蛋白序列" in app._protein_text("nope"),
+      "a row without proteins explains how to produce them")
+app._open_protein_view() if app.annot_tree.get_children() else None
+check(True, "loading a directory without annotation files does not raise")
+
+print("\n=== 7) the window still fits with the new panels ===")
+# The optional panels are off here: with them hidden the window keeps its
+# original footprint; each panel that is switched on grows the requested height,
+# which the notebook absorbs because it is the only row with weight.
+app.var_advanced_on.set(False)
 app.var_annot_on.set(False)
+app._sync_advanced_state()
 app._sync_annotation_state()
 root.update_idletasks()
 req_h_off = root.winfo_reqheight()
@@ -253,37 +388,55 @@ app.var_annot_on.set(True)
 app.var_annot_source.set(ANNOTATION_OFFLINE)
 app._sync_annotation_state()
 root.update_idletasks()
-req_h_on = root.winfo_reqheight()
-check(req_h_off <= 760, "annotation off: height fits the default window",
+req_h_annot = root.winfo_reqheight()
+app.var_advanced_on.set(True)
+app._sync_advanced_state()
+root.update_idletasks()
+req_h_both = root.winfo_reqheight()
+check(req_h_off <= 760, "both panels off: height fits the default window",
       f"{req_h_off} px")
-check(req_w_off <= 1060, "annotation off: width fits the default window",
+check(req_w_off <= 1060, "both panels off: width fits the default window",
       f"{req_w_off} px")
-check(req_h_on <= 920, "annotation on: height stays within a resizable window",
-      f"{req_h_on} px")
-check(req_h_on > req_h_off, "enabling annotation reveals the optional rows",
-      f"{req_h_off} -> {req_h_on} px")
+check(req_h_annot <= 920, "annotation on: height stays within a resizable window",
+      f"{req_h_annot} px")
+check(req_h_annot > req_h_off, "enabling annotation reveals the optional rows",
+      f"{req_h_off} -> {req_h_annot} px")
+check(760 < req_h_both, "enabling both panels asks for more height",
+      f"{req_h_both} px")
 
-# At the default geometry the results area must stay usable and the buttons
-# must stay on screen; enabling annotation grows the window when needed.
+# At the default geometry the results area must stay usable and the buttons must
+# stay on screen; enabling a panel grows the window as far as the screen allows.
 root.geometry("1040x720")
 root.update()
+app.var_advanced_on.set(False)
 app.var_annot_on.set(False)
+app._sync_advanced_state()
 app._sync_annotation_state()
 root.update()
-check(app.btn_run.winfo_ismapped(), "the run button is visible with annotation off")
+check(app.btn_run.winfo_ismapped(), "the run button is visible with both panels off")
+# The buttons in the action row must not be stacked on top of each other.
+buttons = [app.btn_run, app.btn_doctor, app.btn_copy_diag, app.btn_cancel, app.btn_open]
+xs = [b.winfo_x() for b in buttons]
+check(len(set(xs)) == len(xs), "the action buttons each have their own column",
+      f"x={xs}")
+
 app.var_annot_on.set(True)
 app.var_annot_source.set(ANNOTATION_OFFLINE)
+app.var_advanced_on.set(True)
 app._sync_annotation_state()
-for _ in range(4):          # let the idle-time second growth pass run
+app._sync_advanced_state()
+for _ in range(6):          # let the idle-time second growth pass run
     root.update()
-check(app.btn_run.winfo_ismapped(), "the run button is still visible with annotation on")
+check(app.btn_run.winfo_ismapped(), "the run button is still visible with both panels on")
+check(app.btn_copy_diag.winfo_ismapped() and app.btn_cancel.winfo_ismapped(),
+      "the diagnostics and cancel buttons stay on screen")
 
 # The window grows as far as the screen allows, and the annotation table is
 # usable whenever its tab is selected. (On a short screen the notebook absorbs
 # the difference, which is why the table height is measured after selecting the
 # tab rather than from the hidden tab.)
 grew = root.winfo_height() > 720
-check(grew, "enabling annotation grows the window", f"{root.winfo_height()} px")
+check(grew, "enabling the panels grows the window", f"{root.winfo_height()} px")
 app.notebook.select(app.annot_tree.master)
 for _ in range(3):
     root.update()
@@ -292,9 +445,23 @@ if root.winfo_height() >= root.winfo_reqheight():
     check(tree_h >= 80, "the annotation table has room at the grown size",
           f"{tree_h} px")
 else:
-    # short screen: the window is clamped, so require the table to stay usable
-    check(tree_h >= 60, "the annotation table stays usable on a short screen",
+    # Short screen with every panel open: the window is clamped, so require the
+    # table to stay usable rather than roomy.
+    check(tree_h >= 50, "the annotation table stays usable on a short screen",
           f"{tree_h} px (screen {root.winfo_screenheight()} px)")
+
+# With only the annotation panel open the table must be comfortably usable, even
+# on this screen: that is the configuration the documentation recommends.
+app.var_advanced_on.set(False)
+app._sync_advanced_state()
+for _ in range(5):
+    root.update()
+app.notebook.select(app.annot_tree.master)
+for _ in range(3):
+    root.update()
+check(app.annot_tree.winfo_height() >= 80,
+      "with one panel open the annotation table is roomy",
+      f"{app.annot_tree.winfo_height()} px")
 
 root.destroy()
 

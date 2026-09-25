@@ -186,3 +186,103 @@ test_that("--strict turns a skipped annotation into a failure, and is off by def
   expect_error(nanoamp:::cli_strict_check(res2), "--strict")
   expect_silent(nanoamp:::cli_strict_check(res))
 })
+
+# ---------------------------------------------------------------------------
+# cache / doctor --check-online (what the GUI's cache panel calls)
+# ---------------------------------------------------------------------------
+
+test_that("--clear-cache works without input files", {
+  td <- withr::local_tempdir()
+  withr::local_envvar(NANOAMP_CACHE_DIR = td)
+  dir.create(file.path(td, "http"))
+  writeLines("cached", file.path(td, "http", "x.txt"))
+  # Before the fix this failed with "call requires --reads ...": emptying the
+  # cache is a cache operation, not an analysis. It prints a confirmation line,
+  # so the assertion is on the effect rather than on silence.
+  expect_no_error(nanoamp:::cli_cmd_call(c("--clear-cache")))
+  expect_false(file.exists(file.path(td, "http", "x.txt")))
+  expect_no_error(nanoamp:::cli_cmd_batch(c("--clear-cache")))
+})
+
+test_that("the cache subcommand reports and empties the cache", {
+  td <- withr::local_tempdir()
+  withr::local_envvar(NANOAMP_CACHE_DIR = td)
+  dir.create(file.path(td, "regions"), recursive = TRUE)
+  writeLines("abcdef", file.path(td, "regions", "a.txt"))
+  writeLines("ghij", file.path(td, "regions", "b.txt"))
+
+  info <- nanoamp:::cli_cmd_cache(character(0))
+  expect_equal(normalizePath(info$dir, mustWork = FALSE),
+               normalizePath(td, mustWork = FALSE))
+  expect_equal(info$files, 2L)
+  # writeLines() uses \r\n on Windows, so the size is read from disk rather than
+  # hard-coded.
+  expect_equal(info$size,
+               sum(file.info(c(file.path(td, "regions", "a.txt"),
+                               file.path(td, "regions", "b.txt")))$size))
+  # `cache` alone must not delete anything
+  expect_true(file.exists(file.path(td, "regions", "a.txt")))
+
+  cleared <- nanoamp:::cli_cmd_cache("--clear")
+  expect_equal(cleared$files, 2L)          # reported before clearing
+  expect_false(file.exists(file.path(td, "regions", "a.txt")))
+  expect_equal(nanoamp:::annotation_cache_info()$files, 0L)
+})
+
+test_that("doctor --check-online fails loudly when Ensembl is unreachable", {
+  # A port nothing listens on: every HTTP request fails immediately.
+  withr::local_envvar(HTTPS_PROXY = "http://127.0.0.1:9",
+                      HTTP_PROXY = "http://127.0.0.1:9",
+                      NANOAMP_NO_CACHE = "1")
+  chk <- nanoamp:::cli_online_check(timeout = 5L)
+  expect_false(isTRUE(chk$ok))
+  expect_true(length(chk$problems) >= 1L)
+  # The message must point at the offline route, not just report a failure.
+  expect_true(any(grepl("cds", chk$problems)))
+  expect_error(nanoamp:::cli_cmd_doctor("--check-online"),
+               "Online annotation is not usable")
+})
+
+test_that("--min-ref-coverage is a call and batch flag that reaches the analysis", {
+  wanted <- "--min-ref-coverage"
+  expect_true(wanted %in% nanoamp:::cli_long_flags(nanoamp:::cli_call_options()))
+  expect_true(wanted %in% nanoamp:::cli_long_flags(nanoamp:::cli_batch_options()))
+
+  # A read covering half the reference is only kept when the threshold allows it,
+  # which is what proves the flag is forwarded rather than parsed and dropped.
+  ref <- paste(rep(c("ACGT", "TTGC", "GGCA"), length.out = 40), collapse = "")
+  half <- substr(ref, 1, nchar(ref) %/% 2)
+  td <- withr::local_tempdir()
+  fa <- file.path(td, "ref.fa"); writeLines(c(">r", ref), fa)
+  reads <- file.path(td, "reads.fastq")
+  writeLines(unlist(lapply(seq_len(5), function(i) {
+    c(paste0("@r", i), half, "+", strrep("I", nchar(half)))
+  })), reads)
+
+  lenient <- file.path(td, "lenient")
+  nanoamp:::cli_cmd_call(c("--reads", reads, "--reference", fa,
+                           "--outdir", lenient, "--mode", "A", "--aligner", "r",
+                           "--min-ref-coverage", "0.4", "--min-reads", "2"))
+  expect_true(file.exists(file.path(lenient, "haplotypes.tsv")))
+
+  strict <- file.path(td, "strict")
+  expect_error(
+    nanoamp:::cli_cmd_call(c("--reads", reads, "--reference", fa,
+                             "--outdir", strict, "--mode", "A", "--aligner", "r",
+                             "--min-ref-coverage", "0.99")),
+    "no reads left after filtering"
+  )
+  # ... and that failure is classified as an input problem, with a manifest.
+  info <- jsonlite::fromJSON(file.path(strict, "run_manifest.json"))
+  expect_equal(info$status, "failed")
+  expect_equal(info$error_class, "input")
+})
+
+test_that("the usage text lists every command and the new flags", {
+  out <- capture.output(nanoamp:::cli_usage())
+  text <- paste(out, collapse = "\n")
+  for (needle in c("nanoamp cache", "--check-online", "--min-ref-coverage",
+                   "--clear-cache", "--strict")) {
+    expect_match(text, needle, fixed = TRUE)
+  }
+})

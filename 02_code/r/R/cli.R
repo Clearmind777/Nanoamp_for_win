@@ -8,7 +8,8 @@ cli_usage <- function() {
     "Usage:\n",
     "  nanoamp call   --reads <fastq> --reference <fasta> --outdir <dir> [--mode A|B|C]\n",
     "  nanoamp batch  --sample-sheet <tsv> --outdir <dir> [--mode A|B|C]\n",
-    "  nanoamp doctor\n",
+    "  nanoamp doctor [--check-online]\n",
+    "  nanoamp cache  [--cache-dir <dir>] [--clear]\n",
     "  nanoamp help\n\n",
     "Functional annotation (optional):\n",
     "  --annotate-config <config.json>   enable annotation (\"route\": genome | cds)\n",
@@ -20,11 +21,16 @@ cli_usage <- function() {
     "  --no-cache                        ignore the cache for this run\n",
     "  --clear-cache                     empty the cache and exit\n",
     "  --strict                          fail (non-zero) if annotation skipped transcripts\n\n",
+    "Alignment and thresholds:\n",
+    "  --aligner minimap2|r            --threads <n>\n",
+    "  --min-reads <n>                 --min-freq <p>        --min-identity <p>\n",
+    "  --min-ref-coverage <p>          --top-n <n>           --no-intermediates\n\n",
     "Examples:\n",
     "  nanoamp call --reads sample.fastq --reference target.fa --mode A --top-n 20 --outdir out\n",
     "  nanoamp call --reads s.fastq --reference a.fa --outdir out \\\n",
     "      --annotate-config configs/example_cds.json --annotation-detail\n",
-    "  nanoamp doctor\n",
+    "  nanoamp doctor --check-online\n",
+    "  nanoamp cache --clear\n",
     sep = ""
   )
 }
@@ -44,6 +50,8 @@ cli_call_options <- function() {
                           help = "Minimum variant frequency [default 0.02]"),
     optparse::make_option(c("--min-identity"), type = "double", default = 0.90,
                           help = "Minimum read identity [default 0.90]"),
+    optparse::make_option(c("--min-ref-coverage"), type = "double", default = 0.90,
+                          help = "Minimum fraction of the reference covered by a read [default 0.90]"),
     optparse::make_option(c("--identity-cutoff"), type = "double", default = 0.99,
                           help = "Mode B clustering identity cutoff [default 0.99]"),
     optparse::make_option(c("--min-cluster-reads"), type = "integer", default = 2,
@@ -89,6 +97,7 @@ cli_batch_options <- function() {
     optparse::make_option(c("--min-reads"), type = "integer", default = 3),
     optparse::make_option(c("--min-freq"), type = "double", default = 0.02),
     optparse::make_option(c("--min-identity"), type = "double", default = 0.90),
+    optparse::make_option(c("--min-ref-coverage"), type = "double", default = 0.90),
     optparse::make_option(c("--identity-cutoff"), type = "double", default = 0.99),
     optparse::make_option(c("--min-cluster-reads"), type = "integer", default = 2),
     optparse::make_option(c("--consensus-method"), type = "character", default = "decipher"),
@@ -203,16 +212,19 @@ cli_cmd_call <- function(args) {
   opt <- optparse::parse_args(
     optparse::OptionParser(option_list = options), args = args
   )
-  if (is.null(opt$reads) || is.null(opt$reference) || is.null(opt$outdir)) {
-    cli_usage()
-    stop("call requires --reads, --reference and --outdir", call. = FALSE)
-  }
   cli_apply_cache_dir(opt)
   cli_apply_no_cache(opt)
+  # `--clear-cache` is a cache operation, not an analysis: it must work on its
+  # own (the GUI calls "nanoamp call --clear-cache" to empty the cache), so it is
+  # handled before the input arguments are required.
   if (isTRUE(opt$`clear-cache`)) {
     d <- annotation_cache_clear()
     cat("Cleared annotation cache:", d, "\n")
     return(invisible(TRUE))
+  }
+  if (is.null(opt$reads) || is.null(opt$reference) || is.null(opt$outdir)) {
+    cli_usage()
+    stop("call requires --reads, --reference and --outdir", call. = FALSE)
   }
   config_path <- cli_annotation_config(opt, opt$outdir)
   res <- run_haplotype_analysis(
@@ -220,6 +232,7 @@ cli_cmd_call <- function(args) {
     mode = opt$mode, top_n = opt$`top-n`,
     min_reads = opt$`min-reads`, min_freq = opt$`min-freq`,
     min_identity = opt$`min-identity`,
+    min_ref_coverage = opt$`min-ref-coverage`,
     identity_cutoff = opt$`identity-cutoff`,
     min_cluster_reads = opt$`min-cluster-reads`,
     consensus_method = opt$`consensus-method`,
@@ -261,16 +274,17 @@ cli_cmd_batch <- function(args) {
   opt <- optparse::parse_args(
     optparse::OptionParser(option_list = options), args = args
   )
-  if (is.null(opt$`sample-sheet`) || is.null(opt$outdir)) {
-    cli_usage()
-    stop("batch requires --sample-sheet and --outdir", call. = FALSE)
-  }
   cli_apply_cache_dir(opt)
   cli_apply_no_cache(opt)
+  # Same as `call`: emptying the cache works without a sample sheet.
   if (isTRUE(opt$`clear-cache`)) {
     d <- annotation_cache_clear()
     cat("Cleared annotation cache:", d, "\n")
     return(invisible(TRUE))
+  }
+  if (is.null(opt$`sample-sheet`) || is.null(opt$outdir)) {
+    cli_usage()
+    stop("batch requires --sample-sheet and --outdir", call. = FALSE)
   }
   # Resolve the annotation config once for the whole batch (upstream accepted
   # these flags here but never forwarded them, so `batch --annotate-config`
@@ -292,7 +306,9 @@ cli_cmd_batch <- function(args) {
         reads = sheet$reads[i], reference = sheet$reference[i], outdir = outdir,
         mode = opt$mode, top_n = opt$`top-n`, threads = opt$threads,
         min_reads = opt$`min-reads`, min_freq = opt$`min-freq`,
-        min_identity = opt$`min-identity`, identity_cutoff = opt$`identity-cutoff`,
+        min_identity = opt$`min-identity`,
+        min_ref_coverage = opt$`min-ref-coverage`,
+        identity_cutoff = opt$`identity-cutoff`,
         min_cluster_reads = opt$`min-cluster-reads`,
         consensus_method = opt$`consensus-method`,
         aligner = opt$aligner,
@@ -336,6 +352,7 @@ cli_cmd_batch <- function(args) {
 }
 
 cli_cmd_doctor <- function(args) {
+  check_online <- "--check-online" %in% args
   cat("nanoamp version:", nanoamp_version(), "\n")
   cat("R version:", R.version.string, "\n")
   cat("Rscript:", file.path(R.home("bin"), "Rscript"), "\n")
@@ -376,7 +393,69 @@ cli_cmd_doctor <- function(args) {
               if (requireNamespace("Biostrings", quietly = TRUE) &&
                   requireNamespace("jsonlite", quietly = TRUE)) "available" else
                 "unavailable (Biostrings/jsonlite missing)"))
+  # --check-online is what the GUI's "测试 Ensembl 连接" button runs: it answers
+  # the one question a user has when the online route fails, without running an
+  # analysis. Unreachable => non-zero exit, so it can be scripted too.
+  if (check_online) {
+    chk <- cli_online_check()
+    if (isTRUE(chk$ok)) {
+      cat(sprintf("  %-12s %s\n", "online",
+                  sprintf("ok (Ensembl release %s)", chk$release)))
+    } else {
+      cat(sprintf("  %-12s FAILED: %s\n", "online",
+                  paste(chk$problems, collapse = "; ")))
+      stop("Online annotation is not usable from this machine.", call. = FALSE)
+    }
+  }
   invisible(TRUE)
+}
+
+# Is the online annotation route usable right now? Returns list(ok, release,
+# problems) and never throws, so both the CLI and the GUI can report the reason.
+cli_online_check <- function(timeout = 20L) {
+  if (!requireNamespace("Biostrings", quietly = TRUE) ||
+      !requireNamespace("jsonlite", quietly = TRUE)) {
+    return(list(ok = FALSE, release = NA_character_,
+                problems = "Biostrings/jsonlite missing (the offline cds route still works)"))
+  }
+  chk <- tryCatch(annotation_provider_check(timeout = timeout),
+                  error = function(e) list(ok = FALSE, release = NA_character_,
+                                           problems = conditionMessage(e)))
+  if (!isTRUE(chk$ok)) {
+    chk$problems <- c(chk$problems,
+                      "offline route available: --annotate-config with \"route\": \"cds\"")
+  }
+  chk
+}
+
+# Cache inspection for the GUI and for scripts:
+#   nanoamp cache                 path, size and file count
+#   nanoamp cache --clear         empty it
+cli_cache_options <- function() {
+  list(
+    optparse::make_option(c("--cache-dir"), type = "character", default = NULL,
+                          help = "Cache directory [default: per-user cache]"),
+    optparse::make_option(c("--clear"), action = "store_true", default = FALSE,
+                          help = "Empty the cache and exit")
+  )
+}
+
+cli_cmd_cache <- function(args) {
+  options <- cli_cache_options()
+  cli_check_flags(args, options)
+  opt <- optparse::parse_args(
+    optparse::OptionParser(option_list = options), args = args
+  )
+  cli_apply_cache_dir(opt)
+  info <- annotation_cache_info()
+  cat(sprintf("cache-dir   %s\n", info$dir))
+  cat(sprintf("cache-size  %s\n", format(info$size, scientific = FALSE)))
+  cat(sprintf("cache-files %d\n", info$files))
+  if (isTRUE(opt$clear)) {
+    d <- annotation_cache_clear()
+    cat(sprintf("cleared     %s\n", d))
+  }
+  invisible(info)
 }
 
 #' nanoamp command line interface
@@ -398,6 +477,7 @@ nanoamp_cli <- function(args = commandArgs(trailingOnly = TRUE)) {
     call = cli_cmd_call(rest),
     batch = cli_cmd_batch(rest),
     doctor = cli_cmd_doctor(rest),
+    cache = cli_cmd_cache(rest),
     help = cli_usage(),
     cli_usage()
   )

@@ -33,6 +33,46 @@ test_that("R-native aligner runs on a small synthetic dataset", {
   expect_equal(sum(res$haplotypes$count), 10)
 })
 
+test_that("the R aligner reports the coverage a read really has (L13)", {
+  skip_if_not_installed("Biostrings")
+  # The backend used to claim every read spans the whole reference, so a read
+  # covering only half the amplicon passed --min-ref-coverage 0.99 and was
+  # counted as the reference haplotype.
+  ref <- make_random_seq(200, seed = 3)
+  half <- substr(ref, 1, 100)
+  td <- tempfile("nanoamp_r_coverage_"); dir.create(td)
+  fa <- file.path(td, "ref.fa"); write_test_ref(ref, fa)
+  reads <- file.path(td, "reads.fastq")
+  write_test_fastq(rep(half, 5), reads)
+
+  prep <- nanoamp:::prepare_alignment_data(reads, fa, file.path(td, "prep"),
+                                           aligner = "r", threads = 1L)
+  aln <- prep$aln
+  expect_equal(nrow(aln), 5L)
+  expect_true(all(aln$ref_span == 100L))
+  expect_true(all(abs(aln$ref_cov - 0.5) < 1e-9))
+  expect_equal(aln$ref_end, rep(100L, 5))
+
+  # ... and the coverage filter therefore rejects them at the default threshold.
+  expect_error(
+    run_mode_a(reads, fa, file.path(td, "out_strict"), aligner = "r"),
+    "no reads left after filtering"
+  )
+  # With a threshold that allows half coverage the run proceeds and reports it.
+  res <- run_mode_a(reads, fa, file.path(td, "out_lenient"), aligner = "r",
+                    min_ref_coverage = 0.4, min_identity = 0.8)
+  expect_equal(res$qc$n_reads_used, 5L)
+  expect_equal(res$qc$mean_coverage, 2.5)          # 5 reads x 100 bp / 200 bp
+
+  # A full-length read still counts as full coverage.
+  full_reads <- file.path(td, "full.fastq")
+  write_test_fastq(rep(ref, 3), full_reads)
+  prep2 <- nanoamp:::prepare_alignment_data(full_reads, fa, file.path(td, "prep2"),
+                                            aligner = "r", threads = 1L)
+  expect_true(all(prep2$aln$ref_span == 200L))
+  expect_true(all(prep2$aln$ref_cov == 1))
+})
+
 test_that("Mode B clustering is reproducible and does not disturb the caller's RNG", {
   skip_if_not_installed("DECIPHER")
   # DECIPHER::Clusterize is stochastic: with identical input it returned

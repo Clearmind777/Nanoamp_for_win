@@ -180,7 +180,15 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
   `error_message` 与 `log_path`（`nanoamp.log`），GUI 按 `error_class` 给出对应的
   "怎么办"提示，而不再是一句通用报错；
 - **GUI 新增**：「列出转录本」按钮（结果填进「转录本」下拉框，可指定某个 ENST）、
-  「复制诊断信息」按钮（把运行日志整段复制到剪贴板）。
+  「复制诊断信息」按钮（把运行日志整段复制到剪贴板）、「高级参数…」面板
+  （比对方式/线程/各阈值，**只发送改动过的值**）、缓存一行（目录/占用/刷新/清空）
+  与「测试 Ensembl 连接」，以及「注释结果 ↔ 单倍型结果」双向联动和可复制的蛋白序列窗口；
+- **命令行新增**：`nanoamp cache [--clear]`、`nanoamp doctor --check-online`、
+  `--min-ref-coverage`；`--clear-cache` 现在不需要输入文件即可单独使用；
+- **`--aligner r` 的覆盖度修正**：该后端曾把每条 read 都当作覆盖整条参考序列
+  （`ref_cov` 恒为 1、`mean_coverage` 等于 reads 条数），导致部分覆盖的 read 通过
+  `--min-ref-coverage` 并被当成参考单倍型。现在按实际比对片段计算；默认的
+  `minimap2` 后端一直是对的，本次只是补齐 `r` 的行为（详见教程附录 D）。
 
 `make functional-test` 会用 `01_data/` 里 168 个真实运行与提交在
 `03_dependence/baselines/functional/` 的基线逐行对比（Mode B 也逐字节一致，
