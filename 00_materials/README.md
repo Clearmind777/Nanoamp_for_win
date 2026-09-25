@@ -12,7 +12,8 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
 00_materials/
 |-- programs_dev_info.md       # original brief and requested deliverables
 |-- programs_dev_plan_1.md     # development plan (v1)
-|-- tutorial.md                # end-user tutorial: GUI, CLI, R package, dependencies
+|-- tutorial.md                # end-user tutorial: GUI, CLI, R package, dependencies,
+|                              #   optional functional annotation
 `-- work_reports/
     |-- work_report.1.md       # R core algorithms A/B/C
     |-- work_report.2.md       # directory refactor and DECIPHER mode B
@@ -34,7 +35,9 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.17.md      # serious tone throughout: UI strings and every README
     |-- work_report.18.md      # drop the empty 04_builds/; rebuild the R package tarball
     |-- work_report.19.md      # installer: retry file copies that Windows has locked
-    `-- work_report.20.md      # sync Linux's lead: core fixes, functional annotation, GUI
+    |-- work_report.20.md      # sync Linux's lead: core fixes, functional annotation, GUI
+    `-- work_report.21.md      # contract docs, structured status, drop ShortRead,
+                               #   functional baseline + environment stress matrix
 ```
 
 The original request and the requested deliverables are documented in

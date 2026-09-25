@@ -1,0 +1,4 @@
+mode	n_runs	n_ok	n_error	mean_top1_proportion	mean_overlap_rate	mean_elapsed_sec
+A	56	56	0	0.675	0.9807	0.35
+B	56	56	0	0.7272	0.5409	2.16
+C	56	56	0	0.1231	0	0.04

@@ -93,12 +93,18 @@ build_qc_table <- function(values) {
   )
 }
 
-run_manifest <- function(outdir, mode, params, reference, qc, extra = list()) {
+run_manifest <- function(outdir, mode, params, reference, qc, extra = list(),
+                         status = "done") {
   info <- list(
     nanoamp_version = nanoamp_version(),
     mode = mode,
+    # `status` is "done" for a completed run; a failed run gets its own manifest
+    # from write_failure_manifest() so a failure is never indistinguishable from
+    # a run that produced nothing.
+    status = status,
     timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S %z"),
     r_version = R.version.string,
+    log_path = log_current_path(),
     reference = list(
       name = reference$name,
       length = reference$length,
@@ -113,6 +119,56 @@ run_manifest <- function(outdir, mode, params, reference, qc, extra = list()) {
   invisible(info)
 }
 
+# Written when an analysis raises an error, so that the output directory of a
+# failed run still answers "what happened?" - both for a human and for the GUI,
+# which reads `error_class` to choose its hint. Never masks the original error:
+# the caller rethrows it, keeping the exit code at 1.
+write_failure_manifest <- function(outdir, mode, error) {
+  info <- list(
+    nanoamp_version = nanoamp_version(),
+    mode = mode,
+    status = "failed",
+    timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S %z"),
+    r_version = R.version.string,
+    log_path = log_current_path(),
+    error_class = error_class_of(error),
+    error_message = conditionMessage(error)
+  )
+  try({
+    dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+    write_json(info, file.path(outdir, "run_manifest.json"))
+  }, silent = TRUE)
+  invisible(info)
+}
+
+# Does the annotation part of the run have something the caller must know
+# about? Returns a reason string, or NULL when annotation either was not
+# requested or completed in full.
+#
+# Two outcomes count as degraded: some transcripts were dropped (partial
+# success) and nothing could be annotated at all (`available = FALSE`). Both are
+# already recorded in qc.tsv and in the manifest's annotation section; --strict
+# is what turns them into a failure for a pipeline.
+annotation_degradation <- function(ann) {
+  if (is.null(ann) || !isTRUE(ann$requested)) return(NULL)
+  skipped <- ann$qc$n_transcripts_skipped %||% 0L
+  if (isTRUE(skipped > 0L) || !isTRUE(ann$available)) {
+    reason <- ann$qc$annotation_skip_reason %||%
+      sprintf("%s transcript(s) could not be annotated", as.integer(skipped))
+    return(as.character(reason)[1])
+  }
+  NULL
+}
+
+# The manifest of a strict run whose annotation was degraded must not claim
+# "done": the caller is about to exit non-zero. `error_class` is a heuristic on
+# the recorded reason (network vs. input), which is all that is known here.
+strict_manifest_fields <- function(degraded, strict) {
+  if (!isTRUE(strict) || is.null(degraded)) return(list())
+  list(error_class = error_class_of(simpleError(degraded)),
+       error_message = degraded)
+}
+
 run_mode_a <- function(reads_path, reference_path, outdir,
                        top_n = 20L,
                        min_reads = 3L, min_freq = 0.02,
@@ -122,11 +178,17 @@ run_mode_a <- function(reads_path, reference_path, outdir,
                        threads = 4L, keep_intermediates = TRUE,
                        ref_label = NULL, annotation = NULL,
                        list_transcripts = FALSE, annotation_proteins = FALSE,
-                       annotation_detail = FALSE) {
+                       annotation_detail = FALSE, strict = FALSE) {
   aligner <- match.arg(aligner, c("minimap2", "r"))
   outdir <- ensure_dir(outdir)
   ref <- read_reference(reference_path)
   n_total <- count_fastq_reads(reads_path)
+  # An empty FASTQ is an input problem, and saying so is far more useful than
+  # the "no aligned reads" that the aligner would produce a moment later.
+  if (n_total == 0L) {
+    nanoamp_abort(sprintf("FASTQ file contains no reads: %s", reads_path),
+                  class = "input")
+  }
   log_info("Mode A: ", basename(reads_path), " -> ", ref$name, " (", n_total, " reads)")
 
   prep <- prepare_alignment_data(
@@ -135,10 +197,21 @@ run_mode_a <- function(reads_path, reference_path, outdir,
   )
   aln <- prep$aln
   n_primary <- nrow(aln)
-  if (n_primary == 0) stop("Mode A: no aligned reads", call. = FALSE)
+  if (n_primary == 0) {
+    nanoamp_abort(paste0(
+      "Mode A: no aligned reads.\n",
+      "Nothing in this FASTQ aligns to the reference. Check that the FASTQ and\n",
+      "the reference belong to the same sample/amplicon."
+    ), class = "input")
+  }
 
   kept <- filter_alignment_reads(aln, min_identity, min_ref_coverage)
-  if (nrow(kept) == 0) stop("Mode A: no reads left after filtering", call. = FALSE)
+  if (nrow(kept) == 0) {
+    nanoamp_abort(paste0(
+      "Mode A: no reads left after filtering (min_identity / min_ref_coverage).\n",
+      "The reads align but none of them pass the quality thresholds."
+    ), class = "input")
+  }
   log_info("Mode A: kept ", nrow(kept), "/", n_primary, " aligned reads")
 
   disc <- discover_variants(
@@ -202,17 +275,25 @@ run_mode_a <- function(reads_path, reference_path, outdir,
   # was requested but produced nothing (the skip reason must reach qc.tsv).
   if (!is.null(ann$qc)) qc <- c(qc, ann$qc)
   write_tsv(build_qc_table(qc), file.path(outdir, "qc.tsv"))
+  degraded <- annotation_degradation(ann)
+  strict_fields <- strict_manifest_fields(degraded, strict)
   run_manifest(outdir, "A", list(
     top_n = top_n, min_reads = min_reads, min_freq = min_freq,
     min_identity = min_identity, min_ref_coverage = min_ref_coverage,
     homopolymer = homopolymer, strand_bias = strand_bias,
     aligner = aligner, threads = threads
-  ), ref, qc, extra = c(list(reads_md5 = safe_md5(reads_path)),
-                        if (!is.null(ann$manifest)) list(annotation = ann$manifest)))
+  ), ref, qc,
+  status = if (length(strict_fields) > 0L) "failed" else "done",
+  extra = c(list(reads_md5 = safe_md5(reads_path)),
+            if (!is.null(ann$manifest)) list(annotation = ann$manifest),
+            strict_fields))
 
   if (!isTRUE(keep_intermediates) && !is.null(prep$bam)) {
     unlink(c(prep$bam, paste0(prep$bam, ".bai"), paste0(prep$bam, ".minimap2.log")))
   }
   invisible(list(haplotypes = hap, variants = variants_tbl, qc = qc,
-                 annotation = ann$table))
+                 annotation = ann$table,
+                 # Only set when --strict was asked for and annotation was
+                 # degraded; the CLI turns it into a non-zero exit code.
+                 strict_failure = if (isTRUE(strict)) degraded else NULL))
 }

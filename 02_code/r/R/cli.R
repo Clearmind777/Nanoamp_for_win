@@ -18,7 +18,8 @@ cli_usage <- function() {
     "  --annotation-detail               also write variants_annotation.tsv\n",
     "  --cache-dir <dir>                 where reference slices are cached\n",
     "  --no-cache                        ignore the cache for this run\n",
-    "  --clear-cache                     empty the cache and exit\n\n",
+    "  --clear-cache                     empty the cache and exit\n",
+    "  --strict                          fail (non-zero) if annotation skipped transcripts\n\n",
     "Examples:\n",
     "  nanoamp call --reads sample.fastq --reference target.fa --mode A --top-n 20 --outdir out\n",
     "  nanoamp call --reads s.fastq --reference a.fa --outdir out \\\n",
@@ -72,7 +73,9 @@ cli_call_options <- function() {
     optparse::make_option(c("--annotation-proteins"), action = "store_true", default = FALSE,
                           help = "Include reference and alternate protein sequences in annotation.tsv"),
     optparse::make_option(c("--annotation-detail"), action = "store_true", default = FALSE,
-                          help = "Also write variants_annotation.tsv with per-variant consequences")
+                          help = "Also write variants_annotation.tsv with per-variant consequences"),
+    optparse::make_option(c("--strict"), action = "store_true", default = FALSE,
+                          help = "Fail with a non-zero status if annotation had to skip transcripts")
   )
 }
 
@@ -98,7 +101,8 @@ cli_batch_options <- function() {
     optparse::make_option(c("--no-cache"), action = "store_true", default = FALSE),
     optparse::make_option(c("--cache-dir"), type = "character", default = NULL),
     optparse::make_option(c("--annotation-proteins"), action = "store_true", default = FALSE),
-    optparse::make_option(c("--annotation-detail"), action = "store_true", default = FALSE)
+    optparse::make_option(c("--annotation-detail"), action = "store_true", default = FALSE),
+    optparse::make_option(c("--strict"), action = "store_true", default = FALSE)
   )
 }
 
@@ -211,7 +215,7 @@ cli_cmd_call <- function(args) {
     return(invisible(TRUE))
   }
   config_path <- cli_annotation_config(opt, opt$outdir)
-  run_haplotype_analysis(
+  res <- run_haplotype_analysis(
     reads = opt$reads, reference = opt$reference, outdir = opt$outdir,
     mode = opt$mode, top_n = opt$`top-n`,
     min_reads = opt$`min-reads`, min_freq = opt$`min-freq`,
@@ -226,9 +230,29 @@ cli_cmd_call <- function(args) {
     annotation = config_path,
     list_transcripts = isTRUE(opt$`list-transcripts`),
     annotation_proteins = isTRUE(opt$`annotation-proteins`),
-    annotation_detail = isTRUE(opt$`annotation-detail`)
+    annotation_detail = isTRUE(opt$`annotation-detail`),
+    strict = isTRUE(opt$strict)
   )
+  cli_strict_check(res)
   invisible(TRUE)
+}
+
+# `--strict`: annotation that had to skip transcripts is a failure for a
+# pipeline, even though the sequence analysis itself succeeded. The run has
+# already recorded `status = "failed"` and the reason in run_manifest.json, so
+# this only turns it into a non-zero exit code (1, like every other failure: the
+# GUI and the launcher only know 0 and 1).
+cli_strict_check <- function(res) {
+  problem <- res$strict_failure
+  if (is.null(problem)) return(invisible(TRUE))
+  stop(sprintf(
+    paste0(
+      "Annotation was incomplete and --strict was given:\n  %s\n",
+      "See qc.tsv (annotation_skip_reason) and run_manifest.json ",
+      "(annotation.skipped_transcripts).\n",
+      "Drop --strict to treat this as a recorded degradation instead."
+    ), problem
+  ), call. = FALSE)
 }
 
 cli_cmd_batch <- function(args) {
@@ -264,7 +288,7 @@ cli_cmd_batch <- function(args) {
     status <- "ok"
     err <- ""
     tryCatch({
-      run_haplotype_analysis(
+      res_i <- run_haplotype_analysis(
         reads = sheet$reads[i], reference = sheet$reference[i], outdir = outdir,
         mode = opt$mode, top_n = opt$`top-n`, threads = opt$threads,
         min_reads = opt$`min-reads`, min_freq = opt$`min-freq`,
@@ -277,8 +301,12 @@ cli_cmd_batch <- function(args) {
         annotation = config_path,
         list_transcripts = isTRUE(opt$`list-transcripts`),
         annotation_proteins = isTRUE(opt$`annotation-proteins`),
-        annotation_detail = isTRUE(opt$`annotation-detail`)
+        annotation_detail = isTRUE(opt$`annotation-detail`),
+        strict = isTRUE(opt$strict)
       )
+      # Under --strict a degraded annotation is this sample's failure; the row
+      # in batch_summary.tsv then says error, like any other failed sample.
+      cli_strict_check(res_i)
       TRUE
     }, error = function(e) {
       status <<- "error"

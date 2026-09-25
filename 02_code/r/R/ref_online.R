@@ -135,6 +135,16 @@ digest_like <- function(x) {
   sprintf("%08x%08x", h, length(v))
 }
 
+#' Which HTTP client will be used: "curl" or "r"
+#'
+#' Windows 10 1803+ ships curl.exe, but slim or older images may not have it.
+#' `Sys.which("curl")` also finds the copy in the Windows system directory no
+#' matter what PATH says, so this cannot be simulated by editing PATH - the
+#' decision is exposed here so it can be tested directly.
+annotation_http_client <- function() {
+  if (nzchar(Sys.which("curl"))) "curl" else "r"
+}
+
 .http_get_once <- function(url, params = list(), dest = NULL, timeout = 60L) {
   # Split the query off the URL: R's system2() runs through a shell, so an
   # unquoted '&' in the URL would be read as a background operator and the
@@ -170,12 +180,21 @@ digest_like <- function(x) {
     }
   }
   if (is.null(dest)) {
-    out <- suppressWarnings(system2(curl_bin, c(args, base), stdout = TRUE, stderr = FALSE))
-    status <- attr(out, "status")
-    if (!is.null(status) && !identical(as.integer(status), 0L)) {
+    # The body is written to a file and read back, *not* captured with
+    # `stdout = TRUE`: R inserts line breaks into very long captured lines
+    # (measured: a 39,893-character Ensembl JSON line came back as 39,897
+    # characters on 5 lines, splitting tokens such as "GRCh38" and
+    # "havana_tagene"), which corrupts every large single-line response - and
+    # Ensembl answers with exactly one long line.
+    tmp <- tempfile(fileext = ".body")
+    on.exit(unlink(tmp), add = TRUE)
+    status <- suppressWarnings(
+      system2(curl_bin, c(args, "-o", tmp, base), stdout = FALSE, stderr = FALSE)
+    )
+    if (!identical(as.integer(status), 0L) || !file.exists(tmp)) {
       stop(sprintf("HTTP request failed (curl exit %s): %s", status, base), call. = FALSE)
     }
-    return(paste(out, collapse = "\n"))
+    return(paste(readLines(tmp, warn = FALSE), collapse = "\n"))
   }
   status <- suppressWarnings(system2(curl_bin, c(args, "-o", dest, base),
                                      stdout = FALSE, stderr = FALSE))
@@ -231,7 +250,12 @@ digest_like <- function(x) {
       "http", .annotation_url_key(url, params), ".txt"
     )
     if (file.exists(cache_path)) {
-      return(paste(readLines(cache_path, warn = FALSE), collapse = "\n"))
+      txt <- paste(readLines(cache_path, warn = FALSE), collapse = "\n")
+      if (nzchar(trimws(txt))) return(txt)
+      # A truncated/empty entry (killed run, disk error) must not make every
+      # later run fail: drop it and fetch again.
+      log_warn("annotation: dropping an empty cache entry ", basename(cache_path))
+      unlink(cache_path, force = TRUE)
     }
   }
   last <- NULL
@@ -271,8 +295,17 @@ digest_like <- function(x) {
 .ensembl_json <- function(path, cache_key = NULL) {
   cache <- if (is.null(cache_key) || !.annotation_cache_enabled()) NULL else
     .annotation_cache_path("json", cache_key, ".json")
+  parse <- function(txt) {
+    tryCatch(jsonlite::fromJSON(txt, simplifyVector = FALSE),
+             error = function(e) NULL)
+  }
   if (!is.null(cache) && file.exists(cache)) {
-    return(jsonlite::fromJSON(cache, simplifyVector = FALSE))
+    parsed <- parse(readLines(cache, warn = FALSE))
+    if (!is.null(parsed)) return(parsed)
+    # A corrupted cache entry (killed run, disk error, partial write) must not
+    # poison every later run: drop it and fetch the answer again.
+    log_warn("annotation: dropping an unreadable cache entry ", basename(cache))
+    unlink(cache, force = TRUE)
   }
   # Callers may use the documented ';' separator; normalise it to '&'.
   path <- sub(";content-type=", "&content-type=", path, fixed = TRUE)
@@ -280,9 +313,25 @@ digest_like <- function(x) {
     path <- paste0(path, if (grepl("?", path, fixed = TRUE)) "&" else "?",
                    "content-type=application/json")
   }
-  txt <- .http_get(paste0(.ensembl_base, path))
+  url <- paste0(.ensembl_base, path)
+  txt <- .http_get(url)
+  parsed <- parse(txt)
+  if (is.null(parsed)) {
+    # The body came from the HTTP cache and is not valid JSON. Drop that entry
+    # and fetch once more ignoring the cache, instead of failing the run.
+    http_cache <- .annotation_cache_path("http", .annotation_url_key(url, list()), ".txt")
+    log_warn("annotation: dropping an unreadable HTTP cache entry and refetching")
+    unlink(http_cache, force = TRUE)
+    txt <- .http_get(url, use_cache = FALSE)
+    parsed <- parse(txt)
+  }
+  if (is.null(parsed)) {
+    nanoamp_abort(sprintf(
+      "Ensembl returned a response that is not valid JSON: %s", url
+    ), class = "network")
+  }
   if (!is.null(cache)) writeLines(txt, cache)
-  jsonlite::fromJSON(txt, simplifyVector = FALSE)
+  parsed
 }
 
 #' Ensembl release currently served by the REST API

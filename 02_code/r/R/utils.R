@@ -12,10 +12,91 @@
 #' @export
 nanoamp_version <- function() "0.1.0"
 
+# ---------------------------------------------------------------------------
+# Run state and error classification (P0-7)
+#
+# A run that fails must still leave a machine-readable record of *what kind* of
+# failure it was. The GUI picks its "what do I do now" hint from `error_class`,
+# and a pipeline can branch on it without parsing a message.
+# ---------------------------------------------------------------------------
+
+.nanoamp_state <- new.env(parent = emptyenv())
+.nanoamp_state$log_path <- NA_character_
+
+# Is there a per-run log file? Set by run_haplotype_analysis() so that a failed
+# run's console output survives the terminal (and the GUI window) being closed.
+log_set_file <- function(path) {
+  .nanoamp_state$log_path <- if (is.null(path) || length(path) != 1L ||
+                                 is.na(path) || !nzchar(path)) {
+    NA_character_
+  } else {
+    as.character(path)
+  }
+  invisible(.nanoamp_state$log_path)
+}
+
+log_current_path <- function() .nanoamp_state$log_path
+
+#' Signal a nanoamp error with a machine-readable class
+#'
+#' @param message Error message.
+#' @param class One of `"input"`, `"environment"`, `"network"`, `"internal"`.
+#'   `"internal"` means "a bug or a failed self-check in nanoamp itself".
+#' @param call Include the call in the condition.
+#'
+#' @return Never returns; signals a condition of class `nanoamp_<class>`.
+nanoamp_abort <- function(message, class = c("internal", "input", "environment", "network"),
+                          call = FALSE) {
+  class <- match.arg(class)
+  stop(structure(
+    class = c(paste0("nanoamp_", class), "nanoamp_error", "error", "condition"),
+    list(message = as.character(message)[1],
+         call = if (isTRUE(call)) sys.call(-1L) else NULL)
+  ))
+}
+
+# Classify anything that reaches the top of a run. Explicit classes win; the
+# message heuristics only exist for errors raised by base R or by a dependency
+# (file(), curl, system2, ...), which cannot know about our vocabulary.
+error_class_of <- function(e) {
+  cls <- class(e)
+  for (k in c("input", "environment", "network", "internal")) {
+    if (paste0("nanoamp_", k) %in% cls) return(k)
+  }
+  msg <- tolower(paste(conditionMessage(e), collapse = " "))
+  patterns <- list(
+    network = c("could not resolve", "connection", "timed out", "timeout",
+                "curl", "http", "ssl", "tls", "proxy", "ensembl",
+                "network is unreachable", "no internet"),
+    environment = c("missing r packages", "external tool", "permission denied",
+                    "cannot create", "could not create", "no space left",
+                    "read-only file system", "cannot open the connection for writing",
+                    "there is no package called", "unable to load shared object"),
+    input = c("no such file", "cannot open", "cannot read", "not found",
+              "malformed", "invalid", "must be", "must contain", "not a multiple of",
+              "empty file", "no reads", "truncated", "unexpected character",
+              "does not exist", "unsupported")
+  )
+  for (k in names(patterns)) {
+    if (any(vapply(patterns[[k]], function(p) grepl(p, msg, fixed = TRUE),
+                   logical(1)))) {
+      return(k)
+    }
+  }
+  "internal"
+}
+
 log_msg <- function(level, ...) {
   msg <- paste0(...)
-  cat(sprintf("[%s] %-5s %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), level, msg))
+  line <- sprintf("[%s] %-5s %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), level, msg)
+  cat(line, "\n", sep = "")
   utils::flush.console()
+  path <- .nanoamp_state$log_path
+  if (length(path) == 1L && !is.na(path) && nzchar(path)) {
+    # Best effort: a run must not fail because its own log went missing.
+    try(cat(line, "\n", sep = "", file = path, append = TRUE), silent = TRUE)
+  }
+  invisible(line)
 }
 
 log_info <- function(...) log_msg("INFO", ...)
@@ -23,7 +104,15 @@ log_warn <- function(...) log_msg("WARN", ...)
 log_error <- function(...) log_msg("ERROR", ...)
 
 ensure_dir <- function(path) {
-  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  if (!dir.exists(path)) {
+    dir.create(path, recursive = TRUE, showWarnings = FALSE)
+    if (!dir.exists(path)) {
+      nanoamp_abort(sprintf(
+        "Could not create the output directory: %s\nCheck that the path is writable and the disk is not full.",
+        path
+      ), class = "environment")
+    }
+  }
   normalizePath(path, mustWork = TRUE)
 }
 

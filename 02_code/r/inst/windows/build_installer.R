@@ -14,7 +14,7 @@ if (!nzchar(app_dir)) {
 
 pkgs <- c(
   "shiny", "DT",
-  "Biostrings", "IRanges", "Matrix", "Rsamtools", "ShortRead",
+  "Biostrings", "IRanges", "Matrix", "Rsamtools",
   "data.table", "optparse", "jsonlite", "readxl"
 )
 

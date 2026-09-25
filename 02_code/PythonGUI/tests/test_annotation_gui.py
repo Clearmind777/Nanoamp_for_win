@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import tkinter as tk
 from pathlib import Path
 
@@ -26,7 +27,8 @@ REPO = GUI.parent.parent
 sys.path.insert(0, str(GUI))
 
 from nanoamp_gui.app import (  # noqa: E402
-    ANNOTATION_CUSTOM, ANNOTATION_OFFLINE, ANNOTATION_ONLINE, NanoampApp,
+    ANNOTATION_CUSTOM, ANNOTATION_OFFLINE, ANNOTATION_ONLINE, TRANSCRIPT_AUTO,
+    NanoampApp,
 )
 
 failures: list[str] = []
@@ -38,6 +40,13 @@ def check(ok: bool, what: str, extra: str = "") -> None:
         failures.append(what)
 
 
+def walk(widget):
+    """Yield every descendant of `widget`, depth first."""
+    for child in widget.winfo_children():
+        yield child
+        yield from walk(child)
+
+
 root = tk.Tk()
 root.title("annotation gui check")
 app = NanoampApp(root, REPO)
@@ -47,6 +56,32 @@ print("=== 1) default state ===")
 check(not app.var_annot_on.get(), "annotation is off by default")
 check(str(app.entry_cds_start.cget("state")) == "disabled",
       "the CDS form is disabled while annotation is off")
+
+print("\n=== 1b) the switch is on screen, and it is what turns the panel on ===")
+# The annotation panel is hidden while annotation is off, so a switch bound to
+# `var_annot_on` somewhere outside that panel is the only way in. Flipping the
+# variable directly (as the other checks do) would hide a missing widget.
+switches = [w for w in walk(app)
+            if "checkbutton" in w.winfo_class().lower()
+            and str(w.cget("variable")) == str(app.var_annot_on)]
+check(len(switches) == 1, "exactly one checkbutton drives functional annotation",
+      f"{len(switches)} found")
+if switches:
+    # `winfo_ismapped` is not usable here (the test never maps the toplevel), so
+    # require the switch to be under a geometry manager and to have a real size.
+    check(switches[0].winfo_manager() in ("pack", "grid")
+          and switches[0].winfo_reqwidth() > 10,
+          "the switch is laid out in the window",
+          f"manager={switches[0].winfo_manager()!r} "
+          f"width={switches[0].winfo_reqwidth()} px")
+    switches[0].invoke()
+    root.update_idletasks()
+    check(app.var_annot_on.get() is True, "clicking the switch enables annotation")
+    check(str(app.entry_cds_start.cget("state")) != "disabled",
+          "the panel becomes usable after the click")
+    switches[0].invoke()
+    root.update_idletasks()
+    check(app.var_annot_on.get() is False, "clicking again disables it")
 
 print("\n=== 2) CDS validation happens in the GUI ===")
 app.var_annot_on.set(True)
@@ -100,6 +135,109 @@ app.var_annot_custom.set(str(REPO / "does-not-exist.json"))
 app._sync_annotation_state()
 cpath, cerr = app._annotation_config_path()
 check(cpath is None and "不存在" in cerr, "a missing custom config is reported", cerr)
+
+print("\n=== 6b) the transcript picker ===")
+# Offline route: the picker is meaningless and must be disabled, and a leftover
+# online selection must not be passed as --transcript.
+app.var_annot_source.set(ANNOTATION_ONLINE)
+app._sync_annotation_state()
+check(str(app.box_annot_transcript.cget("state")) == "readonly",
+      "the picker is enabled on the online route")
+check(str(app.btn_list_transcripts.cget("state")) == "normal",
+      "the 列出转录本 button is enabled on the online route")
+app.var_annot_transcript.set("ENST00000621650")
+app.var_annot_source.set(ANNOTATION_OFFLINE)
+app._sync_annotation_state()
+check(app.var_annot_transcript.get() == TRANSCRIPT_AUTO,
+      "switching to the offline route resets the picker")
+check(str(app.box_annot_transcript.cget("state")) == "disabled",
+      "the picker is disabled on the offline route")
+check(app._selected_transcript_id() == "", "automatic selection passes no --transcript")
+
+print("\n=== 6c) a listed transcript becomes the run's --transcript ===")
+outdir = Path(tempfile.mkdtemp(prefix="nanoamp_gui_transcripts_"))
+(outdir / "transcripts.tsv").write_text(
+    "transcript_id\tname\tbiotype\tmane\tcanonical\tchrom\tstart\tend\tstrand"
+    "\tcds_overlap_bp\n"
+    "ENST00000621650\tZNF8-201\tprotein_coding\tMANE\tcanonical\t19\t1\t2\t+\t400\n"
+    "ENST00000591325\tZNF8-ERVK3-1-201\tlncRNA\t\tcanonical\t19\t1\t2\t+\t0\n",
+    encoding="utf-8",
+)
+rows = app._load_transcript_rows(outdir)
+check(len(rows) == 2, "transcripts.tsv is parsed", f"{len(rows)} rows")
+app.var_annot_on.set(True)
+app.var_annot_source.set(ANNOTATION_ONLINE)
+app._sync_annotation_state()
+app._finish_transcripts(0, outdir)
+check(TRANSCRIPT_AUTO in app.box_annot_transcript.cget("values"),
+      "the picker keeps the automatic option")
+check("ENST00000621650" in app.box_annot_transcript.cget("values"),
+      "the listed transcripts reach the picker")
+check(app._selected_transcript_id() == "", "the default is still automatic")
+app.var_annot_transcript.set("ENST00000621650")
+check(app._selected_transcript_id() == "ENST00000621650",
+      "a chosen transcript becomes --transcript")
+check("2 个重叠转录本" in app.var_status.get(),
+      "the status line reports what was found", app.var_status.get())
+check(app._load_transcript_rows(Path(tempfile.mkdtemp())) == [],
+      "a run without transcripts.tsv yields no rows")
+
+print("\n=== 6d) diagnostics can be copied ===")
+app._append_log("[GUI] test line")
+app._on_copy_diagnostics()
+check("test line" in root.clipboard_get(), "the log reaches the clipboard",
+      root.clipboard_get()[:40])
+
+print("\n=== 6e) a malformed annotation.tsv does not crash the window (E4) ===")
+bad = Path(tempfile.mkdtemp(prefix="nanoamp_gui_bad_"))
+(bad / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tTRUE\nannotation_available\tTRUE\n"
+    "n_transcripts_annotated\t1\nn_transcripts_skipped\t0\n"
+    "n_haplotypes_annotated\t2\nannotation_source\tcds-config\n",
+    encoding="utf-8",
+)
+# duplicate row ids, a short row and a stray NUL-ish field: what a hand-edited
+# or truncated file looks like
+(bad / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\ttranscript_conflict\t"
+    "protein_change\tvariants\n"
+    "H1\tT1\tno_variant\tFALSE\tp.(=)\t.\n"
+    "H1\tT1\tno_variant\tFALSE\tp.(=)\t.\n"
+    "H2\n",
+    encoding="utf-8",
+)
+(bad / "variants_annotation.tsv").write_text("garbage without tabs at all\nx\n",
+                                             encoding="utf-8")
+app.var_annot_detail.set(True)
+try:
+    app._load_annotation(bad)
+    crashed = ""
+except Exception as exc:  # noqa: BLE001 - the whole point is that this cannot happen
+    crashed = f"{type(exc).__name__}: {exc}"
+check(crashed == "", "a malformed annotation.tsv is handled, not raised", crashed)
+check(app.annot_status.get() != "", "the annotation status line still says something",
+      app.annot_status.get()[:60])
+check(len(app.annot_tree.get_children()) >= 2,
+      "the rows that are readable are still shown",
+      f"{len(app.annot_tree.get_children())} rows")
+check("契约" in app.var_annot_status.get() or app.var_annot_status.get() != "",
+      "the detail tab reports the unreadable file", app.var_annot_status.get()[:60])
+
+# an unreadable file (a directory where a file is expected) is reported too
+broken = Path(tempfile.mkdtemp(prefix="nanoamp_gui_broken_"))
+(broken / "annotation.tsv").mkdir()
+(broken / "qc.tsv").write_text("metric\tvalue\nannotation_enabled\tTRUE\n"
+                               "annotation_available\tTRUE\n", encoding="utf-8")
+app._load_annotation(broken)
+check("annotation.tsv" in app.annot_status.get(),
+      "an unreadable annotation.tsv is reported by name", app.annot_status.get()[:60])
+
+print("\n=== 6f) the log keeps Chinese and long lines intact (E6) ===")
+sample = "[GUI] 中文日志：注释不可用，请改用离线 CDS 路线。" + "x" * 300
+app._append_log(sample)
+logged = app.log_text.get("1.0", "end")
+check(sample in logged, "Chinese and long log lines survive", f"{len(logged)} chars")
+check("�" not in logged, "no replacement characters in the log")
 
 print("\n=== 7) the window still fits with the new group ===")
 root.update_idletasks()

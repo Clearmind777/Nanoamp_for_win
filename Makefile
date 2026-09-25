@@ -1,12 +1,15 @@
 R_PKG := 02_code/r
 
-.PHONY: help install test check cli gui gui-python gui-exe gui-test release install-exe release-check release-test release-assets deps toolchain offline-bundle offline-install clean-builds clean-scratch
+.PHONY: help install test check cli gui gui-python gui-exe gui-test release install-exe release-check release-test release-assets deps toolchain offline-bundle offline-install functional-test functional-baseline stress-test clean-builds clean-scratch
 
 help:
 	@echo "nanoamp (Windows variant) project targets:"
 	@echo "  make install          Install the R package (R CMD INSTALL $(R_PKG))"
 	@echo "  make test             Run testthat tests"
 	@echo "  make check            Build and R CMD check into tmp/builds/r"
+	@echo "  make functional-test  Functional regression over 01_data/ + baseline check"
+	@echo "  make functional-baseline  Re-run the regression and refresh the committed baseline"
+	@echo "  make stress-test      Environment stress matrix (groups A-D; A needs internet)"
 	@echo "  make cli              Run 'nanoamp doctor' from the repository CLI"
 	@echo "  make gui              Launch the Shiny GUI (browser based)"
 	@echo "  make gui-python       Launch the Python/Tkinter desktop GUI"
@@ -38,6 +41,22 @@ check:
 cli:
 	sh 02_code/cli/nanoamp doctor
 
+# Functional regression over the real datasets in 01_data/, then compare the
+# result with the committed baseline (03_dependence/baselines/functional/).
+functional-test:
+	Rscript 03_dependence/r-environment/run_functional_regression.R --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
+	Rscript 03_dependence/r-environment/check_functional_baseline.R --current tmp/test_results/r/test_run_win
+
+# Refresh the baseline after an intended behaviour change; review the diff.
+functional-baseline:
+	Rscript 03_dependence/r-environment/run_functional_regression.R --outdir tmp/test_results/r/test_run_win --modes A,B,C --threads 4
+	Rscript 03_dependence/r-environment/check_functional_baseline.R --current tmp/test_results/r/test_run_win --write-baseline
+
+# Environment stress matrix (plan section 6). Group A needs internet; the
+# results land in tmp/test_results/stress/stress_results.tsv.
+stress-test:
+	python 03_dependence/stress/run_stress_tests.py --group A,B,C,D
+
 gui:
 	Rscript 02_code/gui/run_gui.R
 
@@ -50,9 +69,12 @@ gui-exe:
 
 gui-test:
 	python 02_code/PythonGUI/tests/test_headless.py
+	python 02_code/PythonGUI/tests/test_bundled_r_lookup.py
 	python 02_code/PythonGUI/tests/test_e2e.py
 	python 02_code/PythonGUI/tests/test_frozen.py
 	python 02_code/PythonGUI/tests/test_annotation_gui.py
+	python 02_code/PythonGUI/tests/test_cancel_analysis.py
+	python 02_code/PythonGUI/tests/test_failure_reporting.py
 
 # --- release/ : the bundle that is handed to a user -------------------------
 # Rebuilds the payload pieces (R package tarball, GUI exe) into release/.

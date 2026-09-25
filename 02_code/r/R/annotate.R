@@ -185,6 +185,34 @@ annotation_select_transcripts <- function(ctx) {
   ), call. = FALSE)
 }
 
+#' Candidate transcript table as a data.table (the machine-readable form)
+#'
+#' `--list-transcripts` prints a human table; the GUI needs the same rows as a
+#' file it can parse to build a transcript picker, so both come from here.
+annotation_candidates_table <- function(ctx) {
+  cand <- ctx$candidates
+  if (is.null(cand) || nrow(cand) == 0) {
+    return(data.table::data.table(
+      transcript_id = character(0), name = character(0), biotype = character(0),
+      mane = character(0), canonical = character(0), chrom = character(0),
+      start = integer(0), end = integer(0), strand = character(0),
+      cds_overlap_bp = integer(0)
+    ))
+  }
+  data.table::data.table(
+    transcript_id = cand$transcript_id,
+    name = ifelse(is.na(cand$transcript_name), "-", cand$transcript_name),
+    biotype = cand$biotype,
+    mane = ifelse(cand$is_mane, "MANE", ""),
+    canonical = ifelse(cand$is_canonical, "canonical", ""),
+    chrom = if (is.null(ctx$genomic)) NA_character_ else ctx$genomic$chrom,
+    start = if (is.null(ctx$genomic)) NA_integer_ else ctx$genomic$start,
+    end = if (is.null(ctx$genomic)) NA_integer_ else ctx$genomic$end,
+    strand = if (is.null(ctx$genomic)) NA_character_ else ctx$genomic$strand,
+    cds_overlap_bp = cand$cds_overlap_bp
+  )
+}
+
 #' Print the candidate transcript table (implements --list-transcripts)
 annotation_print_candidates <- function(ctx, con = stdout()) {
   cand <- ctx$candidates
@@ -322,7 +350,10 @@ annotation_verify_reference_protein <- function(structure, genetic_code, retries
   mine <- sub("[*]$", "", mine)
   official <- sub("[*]$", "", official)
   if (identical(mine, official)) {
-    return(list(ok = TRUE, protein = mine, length_aa = nchar(mine)))
+    # `verified` is what run_manifest.json reports: the reference CDS in this
+    # structure was translated and matched the authoritative Ensembl protein.
+    return(list(ok = TRUE, protein = mine, length_aa = nchar(mine),
+                verified = TRUE))
   }
   list(ok = FALSE, problem = sprintf(
     paste0("reference protein mismatch for %s: our translation is %d aa, ",
@@ -815,6 +846,10 @@ run_annotation <- function(ref_seq, hap, variants, outdir, cfg,
   }
   if (isTRUE(list_only)) {
     annotation_print_candidates(ctx)
+    # Also write the candidates as a table: the GUI builds its transcript picker
+    # from this file, and hand-parsing the printed table would be fragile.
+    try(write_tsv(annotation_candidates_table(ctx),
+                  file.path(outdir, "transcripts.tsv")), silent = TRUE)
     return(invisible(list(requested = TRUE, available = FALSE, list_only = TRUE,
                           table = NULL, qc = NULL, manifest = NULL,
                           candidates = ctx$candidates)))
@@ -889,7 +924,15 @@ run_annotation <- function(ref_seq, hap, variants, outdir, cfg,
       ), call. = FALSE)
     }
     if (!quiet) {
-      log_info(sprintf("annotation: %s verified (%d aa)", tid, v1$length_aa))
+      # Say only what happened: the offline cds route has no authoritative
+      # protein to cross-check against (see `protein_verified` above).
+      if (isTRUE(v1$verified)) {
+        log_info(sprintf("annotation: %s verified against the Ensembl protein (%d aa)",
+                         tid, v1$length_aa))
+      } else {
+        log_info(sprintf("annotation: %s structure ok (%d aa, no reference protein to cross-check)",
+                         tid, v1$length_aa))
+      }
     }
     manifest_tr[[length(manifest_tr) + 1L]] <- list(
       transcript_id = tid,
@@ -898,7 +941,11 @@ run_annotation <- function(ref_seq, hap, variants, outdir, cfg,
       is_canonical = isTRUE(tsel$is_canonical[ti]),
       cds_length = nchar(structure$cds_seq),
       protein_length = v1$length_aa,
-      protein_verified = TRUE,
+      # L10 (Windows fix): upstream hard-codes TRUE here. Route "cds" has no
+      # authoritative protein to compare against, so claiming "verified" would
+      # be a fabricated statement in a machine-read manifest. Report what the
+      # V1 cross-check actually established.
+      protein_verified = isTRUE(v1$verified),
       cds_blocks = nrow(structure$cds)
     )
 

@@ -2,40 +2,96 @@
 # FASTA / FASTQ / table input and output
 # ---------------------------------------------------------------------------
 
+# Detecting gzip by content as well as by extension keeps a mislabelled file
+# from being read as text.
+fastq_connection <- function(path, mode = "rt") {
+  by_extension <- grepl("\\.gz$", path, ignore.case = TRUE)
+  by_magic <- FALSE
+  if (!by_extension && file.exists(path)) {
+    probe <- file(path, "rb")
+    on.exit(close(probe), add = TRUE)
+    by_magic <- identical(readBin(probe, "raw", 2L), as.raw(c(0x1f, 0x8b)))
+  }
+  if (by_extension || by_magic) gzfile(path, mode) else file(path, mode)
+}
+
+# Minimal FASTQ reader used instead of ShortRead::readFastq().
+#
+# Reading FASTQ directly is what lets nanoamp drop the ShortRead dependency:
+# ShortRead unconditionally imports pwalign, so requiring it forced every
+# installation to provide pairwiseAlignment() even though only aligner = "r" and
+# the Mode B consensus annotation ever use it.
+#
+# The format assumed is the one every modern basecaller and the company
+# deliverables use: four lines per record, one sequence line per record. Files
+# that violate it are rejected loudly rather than silently mis-parsed.
+# The quality string is returned for each read at its true length.
+read_fastq_records <- function(path, block = 20000L) {
+  # file() and gzfile() already return an open connection
+  con <- fastq_connection(path)
+  on.exit(close(con), add = TRUE)
+  ids <- character(0); seqs <- character(0); quals <- character(0)
+  repeat {
+    lines <- readLines(con, n = 4L * block, warn = FALSE)
+    n <- length(lines)
+    if (n == 0L) break
+    if (n %% 4L != 0L) {
+      stop(sprintf(
+        "Malformed FASTQ (%d lines is not a multiple of 4): %s", n, path
+      ), call. = FALSE)
+    }
+    idx <- seq.int(1L, n, by = 4L)
+    if (!all(startsWith(lines[idx], "@")) || !all(startsWith(lines[idx + 2L], "+"))) {
+      stop(sprintf(
+        paste0(
+          "Malformed FASTQ (expected a '@' header and a '+' separator every ",
+          "fourth line; wrapped records are not supported): %s"
+        ),
+        path
+      ), call. = FALSE)
+    }
+    ids <- c(ids, lines[idx])
+    seqs <- c(seqs, lines[idx + 1L])
+    quals <- c(quals, lines[idx + 3L])
+    if (n < 4L * block) break
+  }
+  list(id = ids, sequence = seqs, quality = quals)
+}
+
 read_fastq <- function(path) {
   if (!file.exists(path)) stop(sprintf("FASTQ file not found: %s", path), call. = FALSE)
-  fq <- if (grepl("\\.gz$", path, ignore.case = TRUE)) {
-    con <- gzfile(path, "rt")
-    on.exit(close(con), add = TRUE)
-    ShortRead::readFastq(con)
-  } else {
-    ShortRead::readFastq(path)
-  }
-  if (length(fq) == 0) {
+  r <- read_fastq_records(path)
+  if (length(r$id) == 0L) {
     return(data.table::data.table(
       read_id = character(0), sequence = character(0), quality = character(0)
     ))
   }
-  qmat <- methods::as(Biostrings::quality(fq), "matrix")
-  qual_chr <- if (nrow(qmat) == 0) character(0) else {
-    vapply(seq_len(nrow(qmat)), function(i) {
-      q <- as.integer(qmat[i, ])
-      q[is.na(q)] <- 0L
-      q <- pmax(pmin(q, 93L), 0L)
-      rawToChar(as.raw(q + 33L))
-    }, character(1))
-  }
   data.table::data.table(
-    read_id = as.character(ShortRead::id(fq)),
-    sequence = as.character(ShortRead::sread(fq)),
-    quality = qual_chr
+    # the leading '@' is not part of the read id (same as ShortRead::id())
+    read_id = sub("^@", "", r$id),
+    sequence = toupper(r$sequence),
+    quality = r$quality
   )
 }
 
-count_fastq_reads <- function(path) {
+count_fastq_reads <- function(path, block = 20000L) {
   if (!file.exists(path)) stop(sprintf("FASTQ file not found: %s", path), call. = FALSE)
-  n <- ShortRead::countFastq(path)
-  as.integer(n$records[1])
+  con <- fastq_connection(path)
+  on.exit(close(con), add = TRUE)
+  n_records <- 0L
+  repeat {
+    lines <- readLines(con, n = 4L * block, warn = FALSE)
+    n <- length(lines)
+    if (n == 0L) break
+    if (n %% 4L != 0L) {
+      stop(sprintf(
+        "Malformed FASTQ (%d lines is not a multiple of 4): %s", n, path
+      ), call. = FALSE)
+    }
+    n_records <- n_records + n %/% 4L
+    if (n < 4L * block) break
+  }
+  as.integer(n_records)
 }
 
 read_reference <- function(path) {

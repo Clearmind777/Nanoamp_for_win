@@ -1167,7 +1167,7 @@ files <- c(
   {listing}
 )
 utils::install.packages(files, lib = {lib!r}, repos = NULL, type = "win.binary")
-need <- c("Biostrings", "IRanges", "Rsamtools", "ShortRead", "data.table",
+need <- c("Biostrings", "IRanges", "Rsamtools", "data.table",
           "jsonlite", "optparse", "readxl", "DECIPHER")
 ok <- all(vapply(need, function(p) requireNamespace(p, quietly = TRUE), logical(1)))
 cat("关键依赖检查:", ok, "\\n")
@@ -1226,6 +1226,35 @@ if (!ok) stop("关键依赖安装后仍不可用")
             self.say(f"{PACKAGE_NAME} 安装失败（代码 {code}）")
             return False
         self.say(f"{PACKAGE_NAME} 安装完成")
+        self._install_annotation_configs()
+        return True
+
+    def _install_annotation_configs(self) -> bool:
+        """Copy the bundled annotation configs where the user can find them.
+
+        The configs travel inside the R package (``R/lib/nanoamp/configs``),
+        which is a place users neither look in nor should edit. A copy in
+        ``<install root>/configs/`` is what the documentation points at, and it
+        is the natural place to put a config for one's own amplicon. Failure to
+        copy is a warning, not a failed install: the offline route works from
+        the package copy (that is where ``nanoamp doctor`` points).
+        """
+        src = self.lib / PACKAGE_NAME / "configs"
+        dest = self.ctx.install_root / "configs"
+        if not src.is_dir():
+            self.say(f"未找到随包注释配置（{src}）；跳过复制（功能注释仍可用）")
+            return False
+        try:
+            dest.mkdir(parents=True, exist_ok=True)
+            copied = 0
+            for item in sorted(src.iterdir()):
+                if item.is_file():
+                    shutil.copy2(item, dest / item.name)
+                    copied += 1
+        except OSError as exc:
+            self.say(f"复制注释配置失败（不影响安装）：{exc}")
+            return False
+        self.say(f"已放置注释示例配置 -> {dest}（{copied} 个文件）")
         return True
 
     def _configure_cli(self) -> bool:
@@ -1312,6 +1341,7 @@ quit(save = "no", status = status, runLast = FALSE)
         assert self.rscript is not None
         lib = str(self.lib).replace("\\", "/")
         minimap2 = str(self.ctx.bin / "minimap2.exe").replace("\\", "/")
+        configs = str(self.ctx.install_root / "configs").replace("\\", "/")
         script = self._write_temp_r("doctor", f"""
 .libPaths(c({lib!r}, .libPaths()))
 # Pin the bundled aligner explicitly. Without this, nanoamp's dependence-dir
@@ -1321,11 +1351,20 @@ quit(save = "no", status = status, runLast = FALSE)
 Sys.setenv(NANOAMP_MINIMAP2 = {minimap2!r})
 suppressPackageStartupMessages(library({PACKAGE_NAME}))
 cat("{PACKAGE_NAME} 版本:", as.character(packageVersion("{PACKAGE_NAME}")), "\\n")
-for (p in c("Biostrings","Rsamtools","ShortRead","data.table")) {{
+for (p in c("Biostrings","Rsamtools","data.table")) {{
   cat(sprintf("  %-12s %s\\n", p, requireNamespace(p, quietly = TRUE)))
 }}
 mp <- {PACKAGE_NAME}:::nanoamp_tool_path("minimap2", required = FALSE)
 cat("  minimap2    ", if (is.null(mp)) "未找到" else mp, "\\n")
+# Annotation prerequisites: a missing curl only disables the online route, so it
+# is reported as a warning rather than a failed self-check.
+cat("  curl        ", if (nzchar(Sys.which("curl"))) Sys.which("curl") else
+  "NOT FOUND (在线注释不可用；离线 CDS 路线仍可用)", "\\n")
+cat("  configs     ", file.exists(file.path({configs!r}, "example_cds.json")),
+    {configs!r}, "\\n")
+cat("  annotation  ", if (requireNamespace("Biostrings", quietly = TRUE) &&
+                          requireNamespace("jsonlite", quietly = TRUE)) "available" else
+  "unavailable (Biostrings/jsonlite missing)", "\\n")
 """)
         code, out = self.run([str(self.rscript), "--vanilla", str(script)], timeout=600)
         for line in out.splitlines():

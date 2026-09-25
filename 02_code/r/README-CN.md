@@ -16,7 +16,7 @@
 
 ```r
 install.packages(c(
-  "Biostrings", "Rsamtools", "ShortRead", "IRanges", "Matrix",
+  "Biostrings", "Rsamtools", "IRanges", "Matrix",
   "data.table", "optparse", "jsonlite", "readxl"
 ))
 

@@ -68,4 +68,34 @@ cat("ok\\n")
     p.write_text(body, encoding="utf-8")
     print(f"   wrote {p.name} ({p.stat().st_size} bytes)")
 
+print("\n--- annotation configs are copied to <install root>/configs ---")
+import tempfile  # noqa: E402
+import types  # noqa: E402
+
+sandbox = Path(tempfile.mkdtemp(prefix="nanoamp_cfg_test_"))
+lib = sandbox / "R" / "lib"
+src = lib / ins.PACKAGE_NAME / "configs"
+src.mkdir(parents=True)
+(src / "example_cds.json").write_text("{}", encoding="utf-8")
+(src / "example_online.json").write_text("{}", encoding="utf-8")
+install_root = sandbox / "target"
+stand_in = types.SimpleNamespace(
+    lib=lib, ctx=types.SimpleNamespace(install_root=install_root),
+    say=lambda *a: None,
+)
+copied = ins.Installer._install_annotation_configs(stand_in)
+have = sorted(p.name for p in (install_root / "configs").glob("*")) if copied else []
+print("copied          :", copied, "->", have or "(nothing)")
+assert copied and have == ["example_cds.json", "example_online.json"], have
+# A package without configs must not fail the install.
+empty_lib = sandbox / "R2" / "lib"
+(empty_lib / ins.PACKAGE_NAME).mkdir(parents=True)
+stand_in2 = types.SimpleNamespace(
+    lib=empty_lib, ctx=types.SimpleNamespace(install_root=sandbox / "target2"),
+    say=lambda *a: None,
+)
+missing = ins.Installer._install_annotation_configs(stand_in2)
+print("missing configs :", missing, "(expected False, install continues)")
+assert missing is False
+
 print("\nINSTALLER LOGIC OK")

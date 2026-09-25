@@ -38,6 +38,9 @@
 #'   `annotation.tsv`.
 #' @param annotation_detail Also write `variants_annotation.tsv` with the
 #'   per-variant consequences.
+#' @param strict When TRUE, an annotation that had to skip transcripts makes the
+#'   run fail (non-zero exit, `status = "failed"` in `run_manifest.json`) instead
+#'   of being recorded as a degradation. Off by default.
 #'
 #' @return A list with `haplotypes`, `variants`, `qc` and (when annotation ran)
 #'   `annotation` elements.
@@ -60,38 +63,53 @@ run_haplotype_analysis <- function(reads, reference, outdir,
                                    annotation = NULL,
                                    list_transcripts = FALSE,
                                    annotation_proteins = FALSE,
-                                   annotation_detail = FALSE) {
+                                   annotation_detail = FALSE,
+                                   strict = FALSE) {
   mode <- toupper(match.arg(mode, c("A", "B", "C")))
-  switch(
-    mode,
-    A = run_mode_a(
-      reads, reference, outdir, top_n = top_n,
-      min_reads = min_reads, min_freq = min_freq,
-      min_identity = min_identity, min_ref_coverage = min_ref_coverage,
-      homopolymer = homopolymer, strand_bias = strand_bias,
-      aligner = aligner, use_samtools = use_samtools,
-      threads = threads, keep_intermediates = keep_intermediates,
-      ref_label = ref_label, annotation = annotation,
-      list_transcripts = list_transcripts,
-      annotation_proteins = annotation_proteins,
-      annotation_detail = annotation_detail
+  # The output directory is created (and the run log starts) before any input is
+  # opened, so that a failed run still leaves run_manifest.json + nanoamp.log to
+  # explain itself. Both are best effort and never mask the real error.
+  outdir <- ensure_dir(outdir)
+  log_set_file(file.path(outdir, "nanoamp.log"))
+  on.exit(log_set_file(NA_character_), add = TRUE)
+
+  tryCatch(
+    switch(
+      mode,
+      A = run_mode_a(
+        reads, reference, outdir, top_n = top_n,
+        min_reads = min_reads, min_freq = min_freq,
+        min_identity = min_identity, min_ref_coverage = min_ref_coverage,
+        homopolymer = homopolymer, strand_bias = strand_bias,
+        aligner = aligner, use_samtools = use_samtools,
+        threads = threads, keep_intermediates = keep_intermediates,
+        ref_label = ref_label, annotation = annotation,
+        list_transcripts = list_transcripts,
+        annotation_proteins = annotation_proteins,
+        annotation_detail = annotation_detail, strict = strict
+      ),
+      B = run_mode_b(
+        reads, reference, outdir, top_n = top_n,
+        identity_cutoff = identity_cutoff, min_cluster_reads = min_cluster_reads,
+        min_identity = min_identity, min_ref_coverage = min_ref_coverage,
+        max_msa_seqs = max_msa_seqs, consensus_method = consensus_method,
+        aligner = aligner, use_samtools = use_samtools,
+        threads = threads, keep_intermediates = keep_intermediates,
+        ref_label = ref_label, annotation = annotation,
+        list_transcripts = list_transcripts,
+        annotation_proteins = annotation_proteins,
+        annotation_detail = annotation_detail, strict = strict
+      ),
+      C = run_mode_c(
+        reads, reference, outdir, top_n = top_n,
+        keep_intermediates = keep_intermediates, ref_label = ref_label,
+        annotation = annotation, list_transcripts = list_transcripts
+      )
     ),
-    B = run_mode_b(
-      reads, reference, outdir, top_n = top_n,
-      identity_cutoff = identity_cutoff, min_cluster_reads = min_cluster_reads,
-      min_identity = min_identity, min_ref_coverage = min_ref_coverage,
-      max_msa_seqs = max_msa_seqs, consensus_method = consensus_method,
-      aligner = aligner, use_samtools = use_samtools,
-      threads = threads, keep_intermediates = keep_intermediates,
-      ref_label = ref_label, annotation = annotation,
-      list_transcripts = list_transcripts,
-      annotation_proteins = annotation_proteins,
-      annotation_detail = annotation_detail
-    ),
-    C = run_mode_c(
-      reads, reference, outdir, top_n = top_n,
-      keep_intermediates = keep_intermediates, ref_label = ref_label,
-      annotation = annotation, list_transcripts = list_transcripts
-    )
+    error = function(e) {
+      write_failure_manifest(outdir, mode, e)
+      log_error("run failed (", error_class_of(e), "): ", conditionMessage(e))
+      stop(e)
+    }
   )
 }

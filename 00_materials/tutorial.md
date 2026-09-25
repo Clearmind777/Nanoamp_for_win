@@ -22,6 +22,9 @@
 
 nanoamp 就是回答这三个问题的。
 
+（还有一个可选的第四个问题：**这些差异会不会改变蛋白**？—— 功能注释，见 §0.7。
+不启用它时，前面三个问题的结果完全不受影响。）
+
 ### 0.2 术语速查（看一次就懂）
 
 | 词 | 大白话 |
@@ -148,6 +151,38 @@ reference_length   529
 
 如果你的运行结果和上面**不完全一样**，先别慌，对照第 1.6 节逐项检查。
 
+### 0.7 可选：功能注释（把变异翻译成生物学后果）
+
+前面三个问题问的是"哪种序列占多少"。如果还想知道**这些差异会不会改变蛋白**，
+就在图形界面里勾选输入区的 **「功能注释…」**（命令行是 `--annotate-config`）。
+它会给出：
+
+| 你会得到 | 说明 |
+|---|---|
+| **后果** | `frameshift`（移码）、`stop_gained`（提前终止）、`stop_lost`（终止丢失）、`missense`（错义）、`synonymous`（同义）等，中英双列 |
+| **蛋白变化** | `p.Ala35fs`、`p.Leu7Phe` 这类描述（HGVS **风格**，但不是经认证的 HGVS 写法） |
+| **两个新标签页** | 「注释结果」（每个「单倍型 × 转录本」一行）与「变异注释」（每个变异一行） |
+
+两条路线，任选一条：
+
+| 路线 | 需要联网 | 你要提供什么 |
+|---|---|---|
+| **离线 CDS（不联网）** | 否 | CDS 在目的序列上的起止坐标（1-based，两端都算；长度必须是 3 的倍数）、链、读码框 |
+| **在线 genome（需联网）** | 是 | 什么都不用提供：程序自己在 GRCh38 上定位扩增子，并从 Ensembl 取转录本结构 |
+
+**不启用注释时，输出与以前逐字节一致**（有测试锁定这一点），所以不需要它的人可以
+完全忽略本节。具体操作见 §1.2 第 5 步（图形界面）和 §2.10（命令行）。
+
+三条必须知道的事实：
+
+1. **CDS 长度不是 3 的倍数**时，程序**不猜、不截断**，而是跳过该注释并记账
+   （`qc.tsv` 的 `n_transcripts_skipped` / `annotation_skip_reason`，
+   `run_manifest.json` 的 `annotation.skipped_transcripts`）。**退出码仍是 0**，
+   因为序列分析本身成功了；要让它算失败，命令行加 `--strict`。
+2. **目的序列与 GRCh38 匹配不足**（锚定覆盖率 < 0.9）时，在线路线**明确报错**，
+   而不是给一个猜出来的坐标；网络不可达同样**非零退出**，不会返回"没有注释的成功结果"。
+3. `protein_change` 是 HGVS **风格**的描述，**未经 HGVS 认证**，不能直接用于临床报告。
+
 ---
 
 # 第 1 部分：GUI 版使用教程
@@ -166,7 +201,7 @@ reference_length   529
 > ⚠️ `nanoamp.exe` 里**只有界面**（约 10 MB），**不含 R 运行时**。R 和 109 个依赖包由 `install.exe` 安装。
 > 所以在一台全新的机器上直接双击 `nanoamp.exe` 是打不开分析的。
 
-打开后窗口长这样（从上到下四块）：
+打开后窗口长这样（从上到下四块；勾选「功能注释…」后是五块）：
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -177,14 +212,19 @@ reference_length   529
 │   测序文件 (FASTQ)  [__________________] [浏览…]         │  ← ① 选 fastq
 │   目的序列 (FASTA)  [__________________] [浏览…]         │  ← ② 选参考序列
 │   输出目录          [__________________] [浏览…]         │  ← ③ 结果放哪
-│   模式 [A - 参考引导 ▾]   显示前 n 条 [20]                │  ← ④ 一般不用改
+│   模式 [A - 参考引导 ▾]   显示前 n 条 [20] [ ] 功能注释 │  ← ④ 一般不用改
+│   配置来源 [离线 CDS（不联网） ▾] CDS 起 [118] 止 [237] │  ← ⑤ 可选，勾选后才出现
+│   链 [+ ▾]   读码框 [0 ▾]                               │
+│   [ ] 输出变异级明细  [ ] 输出蛋白序列                  │
+│   转录本 [自动选择（MANE / 规范） ▾] [列出转录本]        │  ← 仅在线路线可用
 ├─────────────────────────────────────────────────────────┤
-│  [单倍型结果] [QC 指标] [输出文件] [运行日志]              │  ← ⑤ 结果在这里
+│  [单倍型结果] [注释结果] [变异注释]                     │  ← ⑥ 结果在这里
+│  [QC 指标] [输出文件] [运行日志]                        │
 │  排名 │ 编号 │ reads 数 │ 占比 │ 是否与目的序列一致 │ ...  │
 │  ...                                                     │
 │  ┌ 选中某一行可查看该单倍型的完整序列 ────────────────┐    │
 ├─────────────────────────────────────────────────────────┤
-│  [开始分析] [环境自检]              [打开输出目录]  ▓▓▓  │  ← ⑥ 点这里开始
+│  [开始分析] [环境自检] [复制诊断信息]    [打开输出目录]  │  ← ⑦ 点这里开始
 │  就绪。选择 FASTQ 和参考序列后点击"开始分析"。             │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -198,7 +238,17 @@ reference_length   529
 | **输出目录** | 结果放哪。默认 `我的文档\nanoamp 结果`，一般不用改 |
 | **模式** | 保持 `A - 参考引导（推荐）` |
 | **显示前 n 条** | 结果表里最多列出多少种单倍型，保持 `20` |
+| **功能注释…** 复选框 | **可选**。勾选后才在下方显示注释参数；不勾选时整块都不出现，分析结果与以前完全一致 |
+| **配置来源** | 注释路线：`离线 CDS（不联网）` / `在线 genome（需联网，用 Ensembl）` / `自定义 JSON…` |
+| **CDS 起 / 止 / 链 / 读码框** | 仅「离线 CDS」路线要填：CDS 在**目的序列**上的起止（1-based，两端都算）、链、读码框 |
+| **输出变异级明细** | 多写一个 `variants_annotation.tsv`（每个变异一行）。默认已勾选 |
+| **输出蛋白序列** | `annotation.tsv` 里多两列参考/突变蛋白序列（可能很长）。默认不勾 |
+| **转录本** 下拉框 | 仅**在线 genome** 路线可用。默认 `自动选择（MANE / 规范）`；点「列出转录本」后会列出所有重叠的 ENST 供你指定 |
+| **列出转录本** 按钮 | 先跑一次"只列转录本"：把该扩增子在 GRCh38 上重叠的转录本写进运行日志，并填进上面的下拉框（需要联网） |
+| **复制诊断信息** 按钮 | 把运行日志（含「环境自检」的全部输出）复制到剪贴板，方便反馈问题 |
 | **单倍型结果** 标签页 | 核心结果表 |
+| **注释结果** 标签页 | 每个「单倍型 × 转录本」一行的后果（仅在启用注释时有内容） |
+| **变异注释** 标签页 | 每个变异一行的后果（仅在启用注释且勾选明细时有内容） |
 | **QC 指标** 标签页 | 数据质量 |
 | **输出文件** 标签页 | 本次生成的文件的清单，双击可用系统默认程序打开 |
 | **运行日志** 标签页 | R 的实时输出，**出错时看这里** |
@@ -206,7 +256,7 @@ reference_length   529
 | **环境自检** 按钮 | 跑一次 `nanoamp doctor`，把 R / 依赖 / minimap2 的状态写进日志 |
 | **打开输出目录** 按钮 | 在资源管理器里打开结果文件夹 |
 
-## 1.2 填四个输入（逐步操作）
+## 1.2 填输入（逐步操作）
 
 **第 1 步：选测序文件**
 
@@ -246,6 +296,57 @@ reference_length   529
 | **模式** | `A - 参考引导（推荐）` | 默认值就是它 |
 | **显示前 n 条** | `20` | 默认值。调大能让 `haplotypes.fasta` 保存更多序列 |
 
+**第 5 步：要不要功能注释（可选，默认不要）**
+
+只需要"哪种序列占多少"的话，**这一步跳过**，直接点「开始分析」。
+需要判断变异会不会改变蛋白时，按下面操作：
+
+1. 勾选「模式」那一行最右边的 **「功能注释…」** 复选框。勾上之后，输入区下方才会
+   出现注释参数（不勾选时整块都不显示，因此窗口也更小）。
+2. **配置来源** 选一条路线：
+
+   | 选哪个 | 需要联网 | 你要填什么 |
+   |---|---|---|
+   | `离线 CDS（不联网）`（默认） | 否 | CDS 起 / 止 / 链 / 读码框 |
+   | `在线 genome（需联网，用 Ensembl）` | 是 | 什么都不用填 |
+   | `自定义 JSON…` | 看文件内容 | 点「浏览…」选一个注释配置 JSON |
+
+3. 选「离线 CDS」时，填 CDS 在**目的序列**上的位置（1-based，两端都算）。
+   本教程的 E4-3 填：
+
+   ```text
+   CDS 起 [118]   止 [237]   链 [+]   读码框 [0]
+   ```
+
+   这两个坐标来自扩增子上最长的开读框（`ATG…TAG`，120 bp = 40 个密码子）。
+   **120 是 3 的倍数**，所以能翻译。填完参数行下方会即时显示
+   `CDS 长度 120 bp（40 个密码子）`；填错了它会直接说明哪里不对，例如
+   `CDS 长度 121 bp 不是 3 的倍数，注释会被跳过`。
+
+   > ⚠️ 换自己的扩增子时坐标要重新给：「离线 CDS」的坐标**只对得上你选的那条目的序列**。
+   > 怎么拿到坐标见 §2.10.4。
+
+4. 两个输出开关：
+
+   | 开关 | 勾选后 | 默认 |
+   |---|---|---|
+   | **输出变异级明细（variants_annotation.tsv）** | 多写一个文件：每个变异一行，含 CDS 坐标、密码子与氨基酸变化 | **已勾选** |
+   | **输出蛋白序列** | `annotation.tsv` 里多两列参考/突变蛋白序列（可能很长） | 不勾 |
+
+5. 选「在线 genome」时，**建议先点「列出转录本」**：它先跑一次"只列转录本"，
+   把该扩增子在 GRCh38 上重叠的转录本写进「运行日志」，并填进 **转录本** 下拉框。
+   下拉框默认是 `自动选择（MANE / 规范）`（等于让程序自己挑 MANE Select，
+   没有就挑 Ensembl canonical）；也可以指定某一个 ENST。列不出来就说明
+   扩增子定位不到或网络不通，这时改用「离线 CDS」路线。
+
+   > 「列出转录本」需要先选好**测序文件**与**目的序列**：程序要用这条目的序列去
+   > GRCh38 上定位。它只读不写你的输出目录（结果落在临时目录里）。
+
+6. **模式 C 不执行注释**。选了 C 又勾了注释，程序会弹窗说明注释参数被忽略 ——
+   模式 C 只做原始精确匹配统计，没有校正后的序列可以翻译。要用注释请用模式 A 或 B。
+
+> 出错时不用手抄日志：点 **「复制诊断信息」** 会把「运行日志」整段复制到剪贴板。
+
 ## 1.3 点「开始分析」
 
 1. 点 **「开始分析」**。
@@ -262,7 +363,7 @@ reference_length   529
 > 不确定环境是否正常时，**先点一次「环境自检」**，它会把 R、依赖包、minimap2
 > 的状态逐行写进「运行日志」。看到 `minimap2` 那一行是路径而不是 `NOT FOUND` 就对了。
 
-## 1.4 看四个标签页
+## 1.4 看六个标签页
 
 ### 1.4.1 「单倍型结果」—— 最常看的一张表
 
@@ -353,7 +454,82 @@ QC 表里还会给出更多行，本样本的其它关键值：
 **573 个候选变异只有 4 个通过**，这个对比本身就是 nanoamp 的价值所在：
 它把 569 个测序错误挡在了外面。
 
-### 1.4.3 「输出文件」—— 本次生成的文件
+### 1.4.3 「注释结果」—— 注释覆盖了什么
+
+**只在启用了功能注释（§1.2 第 5 步）时才有内容。** 本样本按「离线 CDS」路线
+（CDS 118..237）运行后，这一页顶部的状态行显示：
+
+```text
+已注释 1 个转录本、12 个单倍型（来源：cds-config）。共 12 行后果。
+```
+
+（离线 CDS 路线只有 1 个"转录本"，就是你自己给的那段 CDS，所以是
+12 个单倍型 × 1 个转录本 = 12 行。）
+
+状态行有三种形态。**它报告的是这次运行"覆盖了多少"，而不是表格里有几行**：
+
+| 状态行 | 含义 | 怎么办 |
+|---|---|---|
+| `未运行功能注释。` | 这次没勾注释，或输出里没有注释记录 | 正常 |
+| `注释不可用：<原因>` | 一条都没注释成功 | 原因写在同一行（例如 CDS 长度不是 3 的倍数、网络不可达）。**退出码仍是 0**，序列分析结果照常可用 |
+| `部分完成：已注释 N 个转录本、M 个单倍型；跳过 K 个转录本。原因：<原因>` | 注释了一部分 | 用「在线 genome」路线选全部转录本时常见（某个转录本没有权威 CDS）。详见 `qc.tsv` 的 `annotation_skip_reason` |
+
+表格的列：
+
+| 列 | 含义 |
+|---|---|
+| **编号** | H1、H2…（与「单倍型结果」页一一对应） |
+| **转录本** | 后果按哪个转录本的结构算出（离线路线是 `amplicon_cds_118_237`） |
+| **后果** | 这条单倍型在这个转录本下的后果（中文标签，如"移码"、"同义"） |
+| **最严重后果** | 同一单倍型在**全部**所选转录本中最严重的那一个 |
+| **转录本冲突** | `是` = 这条单倍型在不同转录本下后果不同（注释多个转录本时才可能出现） |
+| **蛋白变化** | HGVS 风格的描述，如 `p.Ala35fs`；与目的序列完全一致时是 `p.(=)` |
+| **变异** | 与「单倍型结果」页的变异描述一致 |
+
+本样本 E4-3 的几行（离线 CDS 路线，CDS 118..237）：
+
+| 编号 | 变异 | 后果 | 蛋白变化 |
+|---|---|---|---|
+| H1 | `218delG` | 移码 | `p.Ala35fs` |
+| H2 | `.` | **无变异** | `p.(=)` |
+| H3 | `218delG;135C>T` | 移码 | 从略 |
+| H4 | `135C>T` | 同义 | 从略 |
+| H5 / H6 / H11 | 从略 | 提前终止 | 从略 |
+| H10 | 从略 | 错义 | `p.Leu7Phe` |
+
+两句话解释这张表：
+
+- **H2 是"无变异"，不是"同义"。** 与目的序列完全一致的序列，后果记为
+  `no_variant`（中文"无变异"），蛋白变化 `p.(=)`；"同义"留给"编码改变了、
+  但氨基酸没变"的情况（本样本是 H4）。看到 `p.(=)` 就说明这条序列与目的序列一字不差。
+- **H1 的 `218delG` 是移码**：第 218 位少了一个 G，而它落在 CDS 内，后面的密码子
+  全部错位，从第 35 位氨基酸起蛋白序列完全变样。
+
+**要判断"这次到底注释了哪些转录本"，请看状态行和 `qc.tsv` 的
+`n_transcripts_annotated` / `n_transcripts_skipped`，不要只看这张表有几行** ——
+一条都没注释成功时表格是空的，那和"没启用注释"是两回事。
+
+### 1.4.4 「变异注释」—— 每个变异一行的后果
+
+**只在勾选了「输出变异级明细」、且本次确实存在变异时才有内容。**
+一行 = 一个变异（不是一条单倍型），所以 H1 的 `218delG` 与 H3 的
+`218delG;135C>T` 会各自展开；本样本共有 22 行。
+
+| 列 | 含义 |
+|---|---|
+| **编号** | 这个变异属于哪条单倍型 |
+| **类型** | `snv` / `ins` / `del` / `delregion` |
+| **参考坐标** | 在线 genome 路线是基因组坐标；**离线 CDS 路线是目的序列上的坐标**（1-based） |
+| **CDS 坐标** | 该变异在拼接后的 CDS 里排第几；**空**表示它不在 CDS 内（后果为"CDS 外"） |
+| **参考碱基 / 变异碱基** | 该坐标正链上的等位基因（负链的结果已经翻转过来） |
+| **原密码子 / 新密码子** | 受影响的密码子（替换类变异才有） |
+| **原氨基酸 / 新氨基酸** | 对应的氨基酸（替换类变异才有） |
+| **后果** | 单变异视角的后果（中文标签） |
+
+> 注意这是**单变异**视角：把 `218delG` 单独拿出来算，和它与 `135C>T` **同时存在**时的
+> 最终后果可能不同。**多变异组合的最终结论以「注释结果」页（`annotation.tsv`）为准。**
+
+### 1.4.5 「输出文件」—— 本次生成的文件
 
 显示文件名和字节数。**双击任意一行用系统默认程序打开**（`.tsv` 会用 Excel 打开）。
 
@@ -370,7 +546,14 @@ QC 表里还会给出更多行，本样本的其它关键值：
 | `alignments.bam.bai` | 96 B | 上面那个 BAM 的索引 |
 | `alignments.bam.minimap2.log` | 1.1 KB | minimap2 自己的日志 |
 
-### 1.4.4 「运行日志」—— 出错时第一个看的地方
+启用功能注释后还会多出两个文件（**没启用注释时不会有这两个文件**）：
+
+| 文件 | 内容 |
+|---|---|
+| `annotation.tsv` | 每个「单倍型 × 转录本」一行后果（就是 1.4.3 那张表） |
+| `variants_annotation.tsv` | 每个变异一行后果（就是 1.4.4 那张表；勾选「输出变异级明细」才有） |
+
+### 1.4.6 「运行日志」—— 出错时第一个看的地方
 
 这里按时间顺序显示 R 的每一行输出，包括：
 
@@ -411,6 +594,8 @@ QC 表里还会给出更多行，本样本的其它关键值：
 | `reference_length` 不是 529 | 选错了参考序列 | 确认选的是 `E4-3\reference.self.fa` |
 | 「是否一致」几乎没有"是" | ①reads 太少 ②参考选错 ③样品真的不纯 | 先看 `n_reads_total`；再确认参考是**本样本**的预期序列；都不是的话，结果就是对的 |
 | 分析失败 | ①文件被别的程序占用 ②输出目录没写权限 ③FASTQ 格式不对 | 看「运行日志」最后几行 |
+| 「注释结果」页显示"注释不可用" | 注释被跳过，**不是分析失败** | 读那一行的原因，再看 `qc.tsv` 的 `annotation_skip_reason`：CDS 长度不是 3 的倍数 / 坐标填错 / 网络不可达 |
+| 勾了「功能注释…」却没有任何注释产物 | 模式 C 不执行注释 | 改用模式 A 或 B 重跑 |
 | 中文/含空格路径出错 | 路径编码问题 | 输入和输出都改用 `D:\nanoamp_data\` 这类纯英文无空格路径 |
 
 ---
@@ -462,14 +647,19 @@ dependence directory: NOT FOUND
   IRanges      TRUE
   Matrix       TRUE
   Rsamtools    TRUE
-  ShortRead    TRUE
   data.table   TRUE
   optparse     TRUE
   jsonlite     TRUE
   readxl       TRUE
   DECIPHER     TRUE
+  pwalign      TRUE
   minimap2     C:\Users\<你的用户名>\AppData\Local\nanoamp\bin\minimap2.exe (2.31-r1302)
   samtools     NOT FOUND
+  curl         C:\Windows\system32\curl.exe
+  cache-dir    C:\Users\<你的用户名>\AppData\Local\nanoamp\cache\ref
+  cache-size   0
+  configs      C:/Users/<你的用户名>/AppData/Local/nanoamp/R/lib/nanoamp/configs
+  annotation   available
 ```
 
 **怎么读这份输出 —— 只看 5 件事：**
@@ -481,6 +671,16 @@ dependence directory: NOT FOUND
 | 各 R 包 | 全部 `TRUE` | 有一个 `FALSE` 就重跑 `install.exe` |
 | **`minimap2`** | **一个 `.exe` 的路径 + `(2.31-r1302)`** | 若是 `NOT FOUND`，见第 3.5 节 |
 | `samtools` | `NOT FOUND` | **这是正常的，无影响**（见 3.5 节） |
+
+末尾还有五行与**功能注释（§2.10）**有关：
+
+| 行 | 期望 | 说明 |
+|---|---|---|
+| `curl` | 一个 `.exe` 路径 | 在线路线取 Ensembl 数据用的 HTTP 客户端。显示 `NOT FOUND` 时在线路线不可用，**离线 CDS 路线照常可用** |
+| `cache-dir` | 一个目录路径 | 参考序列切片的缓存位置（可用 `--cache-dir` 或 `NANOAMP_CACHE_DIR` 改） |
+| `cache-size` | 字节数 | 当前缓存占用；清空用 `--clear-cache` |
+| `configs` | 一个目录路径 | **随包的示例配置目录** —— 里面就有 `example_cds.json` 与 `example_online.json`，`--annotate-config` 直接用这个路径 |
+| `annotation` | `available` | 注释所需的 R 包（Biostrings / jsonlite）是否可用 |
 
 关于 `dependence directory: NOT FOUND`：
 
@@ -513,7 +713,7 @@ rank  haplotype_id  count  proportion  is_reference  variants
 
 （`proportion` 是小数，`0.315` 就是 31.5%。GUI 里显示成百分比是为了好读。）
 
-跑完后 `tmp\test_results\demo\E4-3\` 里就是 1.4.3 节列的那 8 个文件。
+跑完后 `tmp\test_results\demo\E4-3\` 里就是 1.4.5 节列的那 8 个文件。
 
 ## 2.4 nanoamp call 的全部参数
 
@@ -534,6 +734,25 @@ rank  haplotype_id  count  proportion  is_reference  variants
 | `--threads` | `4` | 线程数 | 机器核多就调大，如 `--threads 8` |
 | `--ref-label` | 参考文件名 | 输出里显示的参考名称 | 想让 `variants.tsv` 的 `Chr` 列短一点/好看一点 |
 | `--no-intermediates` | 关（即保留） | 不保留 `alignments.bam` 等中间文件 | 只想留 TSV、省空间时加上 |
+
+**功能注释相关的 9 个参数**（可选；一个都不加时，程序行为与以前完全一致）：
+
+| 参数 | 默认值 | 说明 | 什么时候用 |
+|---|---|---|---|
+| `--annotate-config <config.json>` | 关 | **启用注释的唯一开关**；配置文件里写 `"route": "genome"` 或 `"cds"` | 需要生物学后果时 |
+| `--transcript <ENST…\|all>` | 配置文件里的值 | 只注释指定转录本；`all` = 注释所有重叠转录本。**不改配置文件，只覆盖本次运行** | 在线路线里挑转录本 |
+| `--list-transcripts` | 关 | 只列出扩增子重叠的转录本后退出（需要联网，不做分析）；同时把这份清单写成 `transcripts.tsv`（GUI 的「列出转录本」读的就是它） | 先看有哪些转录本，再决定注释哪个 |
+| `--annotation-proteins` | 关 | `annotation.tsv` 里多两列参考/突变蛋白序列（可能很长） | 要拿蛋白序列做下游分析 |
+| `--annotation-detail` | 关 | 额外写 `variants_annotation.tsv`（每个变异一行的后果） | 要逐变异核对 |
+| `--cache-dir <dir>` | 用户缓存目录 | 参考序列切片的缓存位置（等价于设环境变量 `NANOAMP_CACHE_DIR`） | 想把缓存放到指定磁盘 |
+| `--no-cache` | 关 | **本次运行不读也不写缓存**（不会删除缓存目录 —— 目录是多次运行共享的） | 怀疑缓存过期，想强制重取 |
+| `--clear-cache` | — | 清空缓存目录后退出（不做分析） | 释放磁盘空间 |
+| `--strict` | 关 | 注释有转录本被跳过时**以非零状态退出**（默认只是记账，退出码仍是 0） | 流水线不接受"部分成功" |
+
+> **三个常见误用**：`--annotate`（少了 `-config`）会被直接拒绝，并提示最接近的
+> 已实现参数；`--annotation-route` **不存在** —— 路线写在配置文件里；
+> `--ensembl-release` 未实现，release 号请从 `run_manifest.json` 的
+> `annotation.ensembl_release` 读取。
 
 **只改一个参数的例子**（想看前 100 条单倍型，并用 8 线程）：
 
@@ -630,6 +849,8 @@ tmp\test_results\batch\
 |-- variants.tsv                ← 所有候选变异位点（含 PASS 和 FILTERED）
 |-- qc.tsv                      ← 质量指标（两列：metric / value）
 |-- run_manifest.json           ← 参数、版本、输入文件 MD5（可追溯）
+|-- annotation.tsv              ← 仅启用功能注释时：每个「单倍型 × 转录本」一行后果
+|-- variants_annotation.tsv     ← 仅启用注释 + --annotation-detail 且本次确有变异时：每个变异一行
 |-- alignments.bam              ← 比对结果（加了 --no-intermediates 则没有）
 |-- alignments.bam.bai          ← BAM 索引
 `-- alignments.bam.minimap2.log ← minimap2 的日志
@@ -727,6 +948,132 @@ exact_reference_proportion	0.314554
 
 **想证明"这张表是哪次运行、用什么参数、拿什么输入跑出来的"，给人看这个文件就行。**
 
+排查时最常用的几个字段：
+
+| 字段 | 含义 |
+|---|---|
+| `status` | `"done"` = 跑完了；`"failed"` = 失败（失败时也会写出这个文件，因此"什么都没产出"和"跑失败"不会混淆） |
+| `error_class` | 只有 `status = "failed"` 才有：失败类别的机器可读取值 `input` / `environment` / `network` / `internal` |
+| `error_message` | 失败的具体原因（人读） |
+| `log_path` | 本次运行的日志文件路径（`nanoamp.log`） |
+| `annotation` | **仅启用功能注释时**才有，见 §2.6 末尾 |
+
+### 启用功能注释时多出的文件
+
+加上 `--annotate-config` 之后，输出目录里就多两个文件：
+
+| 文件 | 什么时候有 | 内容 |
+|---|---|---|
+| `annotation.tsv` | 只要有转录本注释成功 | 每个「单倍型 × 转录本」一行后果 |
+| `variants_annotation.tsv` | 传了 `--annotation-detail` **且**本次确实存在变异 | 每个变异一行后果 |
+
+**不传 `--annotate-config` 时，输出与以前逐字节一致**（有测试锁定这一点）：
+既不会多出文件，`qc.tsv` 也不会多出任何注释行。
+
+### `annotation.tsv` 的列
+
+| 列 | 含义 |
+|---|---|
+| `haplotype_id` | 关联 `haplotypes.tsv` 的编号 |
+| `count` / `proportion` | 从 `haplotypes.tsv` 带过来，便于直接阅读 |
+| `transcript_id` / `transcript_name` | 所用转录本 |
+| `is_mane` / `is_canonical` | 该转录本是否 MANE Select / Ensembl canonical |
+| `cds_ok` | `FALSE` = CDS 边界或序列异常，后面的列为空 |
+| `ref_protein_length` / `alt_protein_length` | 参考 / 突变蛋白长度（氨基酸数） |
+| `n_aa_changed` | 改变的氨基酸个数 |
+| `protein_change` | HGVS **风格**的描述（如 `p.Ala35fs`、`p.Leu7Phe`、`p.(=)`），**不是合规 HGVS** |
+| `consequence_en` / `consequence_zh` | 后果英文枚举 + 中文标签（中英双列） |
+| `consequence_any_transcript` / `_zh` | 该单倍型在所选转录本中**最严重**的后果 |
+| `transcript_conflict` | `TRUE` = 同一单倍型在不同转录本下后果不同 |
+| `variants` / `signature` | 与 `haplotypes.tsv` 一致 |
+| `notes` | 异常说明，例如 `length change +14 bp (not a multiple of 3)` |
+| `ref_protein` / `alt_protein` | **仅 `--annotation-proteins` 时**输出（可能很长） |
+| `rank` | 单倍型 × 转录本的排序序号（附在最后一列） |
+
+后果枚举的**顺序就是严重度从高到低**（`consequence_any_transcript` 取最严重时按它排）：
+
+```text
+frameshift  stop_gained  stop_lost  start_lost
+inframe_insertion  inframe_deletion  missense  synonymous
+splice_donor  splice_acceptor  splice_region
+5_prime_UTR  3_prime_UTR  intron  outside_cds  intergenic
+cds_boundary_disrupted  cds_ambiguous_base  no_variant
+```
+
+> 约定：**与目的序列完全一致的单倍型记 `no_variant`**（中文"无变异"，蛋白 `p.(=)`），
+> 而不是 `synonymous` —— 后者表示"有编码改变但沉默"，含义不同。
+
+### `variants_annotation.tsv` 的列
+
+每个变异一行，是**单变异视角**：
+
+| 列 | 含义 |
+|---|---|
+| `haplotype_id` / `transcript_id` | 所属单倍型与所用转录本 |
+| `type` | `snv` / `ins` / `del` / `delregion` |
+| `genome_pos` | 在线路线为基因组坐标（1-based）；**离线路线为目的序列上的坐标** |
+| `cds_pos` | 该变异在拼接后 CDS 中的位置；空 = 不在 CDS 内 |
+| `ref` / `alt` | 所在坐标系正链上的等位基因（负链已翻转） |
+| `codon_ref` / `codon_alt` | 受影响的密码子（仅替换类变异） |
+| `aa_ref` / `aa_alt` | 对应氨基酸（仅替换类变异） |
+| `consequence_en` / `consequence_zh` | 单变异后果（中英双列） |
+
+> 多变异组合的最终后果以 `annotation.tsv` 为准，两者可能不同。
+
+### `qc.tsv` 里的注释指标
+
+启用注释后，`qc.tsv` 会多出以下行：
+
+| 指标 | 含义 |
+|---|---|
+| `annotation_enabled` | 本次是否请求了注释（`TRUE`） |
+| `annotation_name` | 配置里的 `name` |
+| `annotation_route` | `genome` 或 `cds` |
+| `annotation_source` | 结构与序列的**真正来源**：`ensembl-rest`（在线）或 `cds-config`（离线，全程不访问 Ensembl） |
+| `ensembl_release` | 在线路线用的 Ensembl 版本（离线路线为空） |
+| `genetic_code` | 遗传密码表名（默认 `Standard`） |
+| `n_transcripts` | 选中的转录本数 |
+| `n_transcripts_annotated` / `n_transcripts_skipped` | 成功 / 被跳过的条数，**两者之和 = `n_transcripts`** |
+| `annotation_available` | `FALSE` = 一条都没注释成功 |
+| `n_haplotypes_annotated` / `n_haplotypes_skipped` | 单倍型层面的成功 / 失败数 |
+| `n_frameshift` `n_stop_gained` `n_stop_lost` `n_start_lost` `n_missense` `n_synonymous` `n_inframe` | 各类后果的单倍型计数（按"最严重后果"统计） |
+| `n_transcript_conflicts` | 在不同转录本下后果不同的单倍型数 |
+| `annotation_skip_reason` | **仅当 `n_transcripts_skipped > 0` 时才有这一行** |
+
+**只要有转录本被跳过 —— 无论是"部分成功"还是"全部失败" —— 都会被记录**
+（控制台上那句 `WARN` 在运行结束后无法追溯）：`qc.tsv` 写 `annotation_skip_reason`，
+`run_manifest.json` 写 `annotation.skipped_transcripts`。
+
+**要判断"这次到底注释了哪些转录本"，请看 `n_transcripts_skipped` 与
+`skipped_transcripts`，不要只看 `annotation.tsv` 里出现了几个转录本。**
+
+### `run_manifest.json` 的 `annotation` 段
+
+```json
+"annotation": {
+  "enabled": true,
+  "available": true,
+  "source": "cds-config",
+  "ensembl_release": null,
+  "config_path": "...", "config": { },
+  "genomic": null,
+  "transcripts": [ { "transcript_id": "amplicon_cds_118_237", "transcript_name": "...",
+                     "is_mane": false, "is_canonical": false,
+                     "cds_length": 120, "protein_length": 40,
+                     "protein_verified": false, "cds_blocks": 1 } ],
+  "skipped_transcripts": []
+}
+```
+
+- `enabled` / `available`：请求了注释但一条都没成功时是 `true` / `false`
+  （**进程仍以退出码 0 结束**，因为序列分析本身成功了）；
+- `skipped_transcripts`：**始终存在**，逐条给出 `transcript_id` / `transcript_name` /
+  `problem` —— 注释了 8 个转录本中的 7 个时，这里会写明少的是哪一个、为什么；
+- `genomic`：在线路线才有，记录扩增子被定位到 GRCh38 的哪个位置、一致度与所用方法；
+- `protein_verified`：`true` **仅当**本次把参考 CDS 翻译后与 Ensembl 给出的蛋白逐残基
+  比对通过。离线 CDS 路线没有权威蛋白可比对，因此是 `false` —— 这是"没验证"，
+  不是"验证失败"。
+
 ## 2.7 用命令行快速看一眼结果
 
 ```bat
@@ -755,6 +1102,16 @@ Import-Csv "tmp\test_results\demo\E4-3\haplotypes.tsv" -Delimiter "`t" | Select-
 
 当前实现所有失败都返回 `1`，更细的退出码是后续改进方向。
 
+**功能注释被跳过时，退出码仍是 0。** 注释是附加步骤：它被跳过或不可用时，序列分析
+本身仍然成功，所以进程返回 0，只是会把"跳过了什么、为什么"写进 `qc.tsv`
+（`n_transcripts_skipped` / `annotation_skip_reason`）和 `run_manifest.json`
+（`annotation.skipped_transcripts`）。要在流水线里把它当失败处理，加 `--strict`：
+此时退出码为 `1`，`run_manifest.json` 的 `status` 记为 `"failed"` 并带
+`error_class` / `error_message`。
+
+唯一的例外是**在线路线取不到数据**（网络不可达、Ensembl 返回错误）：这属于分析无法
+完成，会**直接以非零状态退出**，不会给出"没有注释的成功结果"。
+
 在 PowerShell 里判断：
 
 ```powershell
@@ -779,6 +1136,146 @@ if errorlevel 1 echo 环境自检失败
 
 > 另一种不依赖 PATH 的用法：直接用完整路径
 > `"%LOCALAPPDATA%\nanoamp\bin\nanoamp.cmd" doctor`。
+
+## 2.10 功能注释（可选）
+
+不传 `--annotate-config` 时，程序的行为与以前完全一致（不写任何注释产物），
+所以这一节可以整节跳过。
+
+仓库自带两个可以直接使用的示例配置（源码在 `02_code\r\inst\configs\`）。
+**安装后它们有两份**：一份在 nanoamp 包自己的 `configs\` 目录（`nanoamp doctor`
+输出的 `configs` 一行就是它），另一份是安装器复制到 **`<安装目录>\configs\`**
+的可编辑副本 —— 想改坐标就改后者，重装不会覆盖你在别处写的配置：
+
+| 文件 | 路线 | 需要联网 | 用途 |
+|---|---|---|---|
+| `example_cds.json` | `cds` | 否 | 离线兜底：自己给出 CDS 在目的序列上的起止坐标，只做翻译 |
+| `example_online.json` | `genome` | 是 | 默认路线：程序自己在 GRCh38 上定位扩增子，并从 Ensembl 取转录本结构 |
+
+### 2.10.1 离线 CDS 路线：不联网，只需要 CDS 坐标
+
+用本教程的 E4-3（`example_cds.json` 里的坐标正好是这段扩增子上最长的开读框）：
+
+```powershell
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --top-n 20 --annotate-config "02_code\r\inst\configs\example_cds.json" --annotation-detail --outdir "tmp\test_results\demo\E4-3_annot"
+```
+
+**预期多出来的东西**：
+
+```text
+tmp\test_results\demo\E4-3_annot\
+|-- annotation.tsv              ← 12 行（12 个单倍型 × 1 个转录本）
+|-- variants_annotation.tsv     ← 22 行（每个变异一行）
+`-- qc.tsv                      ← 多出注释相关的那二十来行指标
+```
+
+`qc.tsv` 里应看到这些行（节选；完整的注释指标见 §2.6）：
+
+```text
+annotation_enabled	TRUE
+annotation_name	example_cds_route
+annotation_route	cds
+annotation_source	cds-config
+genetic_code	Standard
+n_transcripts	1
+n_transcripts_annotated	1
+n_transcripts_skipped	0
+annotation_available	TRUE
+n_haplotypes_annotated	12
+```
+
+`annotation.tsv` 里的前几行（`consequence_zh` 与 `protein_change` 两列）：
+
+| 编号 | 变异 | consequence_en | consequence_zh | protein_change |
+|---|---|---|---|---|
+| H1 | `218delG` | `frameshift` | 移码 | `p.Ala35fs` |
+| H2 | `.` | `no_variant` | 无变异 | `p.(=)` |
+| H3 | `218delG;135C>T` | `frameshift` | 移码 | 从略 |
+| H4 | `135C>T` | `synonymous` | 同义 | 从略 |
+
+另外，H10 是错义（`p.Leu7Phe`），H5 / H6 / H11 是提前终止。
+**H2 记的是 `no_variant`（无变异）而不是"同义"**：它与目的序列一字不差，
+蛋白变化写成 `p.(=)`。
+
+### 2.10.2 在线 genome 路线：需要联网，先看有哪些转录本
+
+在线路线不需要坐标，但**先确认扩增子落在哪个转录本**更稳妥：
+
+```powershell
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --outdir "tmp\test_results\demo\E4-3_list" --list-transcripts
+```
+
+它打印扩增子在 GRCh38 上的位置和重叠转录本表（`transcript_id` / `name` /
+`biotype` / `MANE` / `canonical` / `cds_overlap_bp`）后退出，不做分析；同一份清单
+还会写成 `<输出目录>\transcripts.tsv`（图形界面的「转录本」下拉框读的就是它）。
+拿到 `transcript_id` 再正式注释：
+
+```powershell
+nanoamp call --reads "01_data\TSM20260826\E4-3\reads.fastq" --reference "01_data\TSM20260826\E4-3\reference.self.fa" --mode A --annotate-config "02_code\r\inst\configs\example_online.json" --transcript ENST00000621650 --annotation-proteins --outdir "tmp\test_results\demo\E4-3_online"
+```
+
+**一次真实的在线运行（可以直接复现）**：`03_dependence\stress\data\znf8_exon_amplicon.fa`
+是 GRCh38 上 `19:58,294,617-58,295,016`（正链）的一段真实序列，落在 ZNF8 规范转录本
+`ENST00000621650` 的编码外显子里。用它的 90 条合成 reads（60 条参考 + 各 20 条带
+`50G>A` / `120G>A`）跑在线路线，实测结果：
+
+```text
+annotation: amplicon located via gene panel (ZNF8) at 19:58294616-58295015 (+)
+annotation: ENST00000621650 verified against the Ensembl protein (575 aa)
+annotation.tsv: H1 no_variant / H2 missense p.Met286Lys（50G>A）/ H3 synonymous（120G>A）
+qc.tsv: annotation_source=ensembl-rest  ensembl_release=116  n_transcripts=1
+耗时约 16 秒（含取转录本结构、CDS、参考蛋白与限流等待）
+```
+
+复现命令（`make stress-test` 的 A 组就是跑这个）：
+
+```powershell
+python 03_dependence\stress\run_stress_tests.py --group A
+```
+
+`--transcript all` 会注释全部重叠转录本。实测同一个位点有 6 个重叠转录本：
+5 个被正确注释、1 个（lncRNA，没有权威 CDS）被**跳过并记账** —— 这正是"部分完成"
+的正常形态，`qc.tsv` 的 `n_transcripts_skipped` 与 `run_manifest.json` 的
+`annotation.skipped_transcripts` 里都能查到是哪一个、为什么。
+
+> **本教程的 E4-3 没有跑完整条在线路线。** 它的扩增子不在内置 gene panel
+> （当前只有 ZNF8）里，程序会退化为逐染色体扫描，在测试机上耗时过长，
+> 无法作为教程演示。这不是 bug，是已知限制（见附录 D）。需要功能注释时
+> **优先用离线 CDS 路线**，或者先跑一次 `--list-transcripts` 确认扩增子能被快速定位。
+
+### 2.10.3 缓存与网络
+
+| 事项 | 说明 |
+|---|---|
+| 缓存位置 | 按优先级：环境变量 `NANOAMP_CACHE_DIR` → `%LOCALAPPDATA%\nanoamp\cache\ref` → `%TEMP%\nanoamp\ref` |
+| 缓存内容 | 参考序列切片，按 10 kb 网格缓存；重复运行同一区域直接命中，不重新下载 |
+| 缓存坏了怎么办 | 会自动丢弃读不出来的那一条并重新下载（不会崩、也不会拿坏数据当结果）；要一次性清干净用 `--clear-cache` |
+| `--cache-dir <dir>` | 指定缓存位置（等价于设 `NANOAMP_CACHE_DIR`） |
+| `--no-cache` | 本次运行**不读也不写**缓存；**不会删除缓存目录**（目录由并发运行共享） |
+| `--clear-cache` | 清空缓存目录并退出 |
+| HTTP 客户端 | 优先用系统的 `curl.exe`（Windows 10 1803 起自带）；缺失时回退到 R 自带的下载能力（两条路径都有测试） |
+| `nanoamp doctor` | 结尾会打印 `curl` / `cache-dir` / `cache-size` / `configs` / `annotation` 五项状态 |
+
+### 2.10.4 怎么拿到自己扩增子的 CDS 坐标
+
+按可靠性从高到低：
+
+1. **扩增子设计文件**：引物与载体/基因的坐标表，通常直接给出 CDS 在设计序列上的起止；
+2. **公司交付的注释**：`01_data\**\variants.*.xlsx` 这类表格所用的坐标体系；
+3. **自己找开读框**：在目的序列上找 `ATG … 终止密码子`。本教程用的
+   `example_cds.json` 就是这么定的（118..237，120 bp）。这只保证"能翻译"，
+   **不保证它就是真实 CDS**，真实坐标要来自实验设计；
+4. **先用在线路线反推**：跑一次 `--list-transcripts`，看扩增子定位到哪个转录本、
+   CDS 分几段，再换算到扩增子坐标系。
+
+**两条硬性约束**：
+
+- **CDS 长度必须是 3 的倍数**，否则跳过该注释（不猜、不截断）：
+  `qc.tsv` 写 `annotation_available = FALSE` 与 `annotation_skip_reason`，
+  `run_manifest.json` 写 `available: false` 与 `skipped_transcripts`，**退出码仍是 0**；
+- **`cds` 坐标只对得上你传给 `--reference` 的那条序列**，换参考就要重新给坐标。
+
+> 完整的文件与字段契约见 `02_code/shared/docs/output_schema.md`。
 
 ---
 
@@ -852,10 +1349,12 @@ nanoamp 的依赖分两组：**CRAN** 和 **Bioconductor**。
 | **Bioconductor** | `Biostrings` | **必需** | 序列读写与操作 |
 | **Bioconductor** | `IRanges` | **必需** | 区间运算 |
 | **Bioconductor** | `Rsamtools` | **必需** | **SAM → BAM 转换（这就是不需要 samtools 的原因）** |
-| **Bioconductor** | `ShortRead` | **必需** | 读 FASTQ |
 | **Bioconductor** | `Matrix` | 必需（CRAN/Bioc 均有） | 稀疏矩阵，聚类用 |
 | **Bioconductor** | `DECIPHER` | 可选（推荐） | **模式 B** 的从头聚类。不装会退化成贪心聚类 |
 | **Bioconductor** | `pwalign` | 可选 | **`aligner = "r"` 时需要**（Bioconductor ≥ 3.19） |
+
+> **不再需要 `ShortRead`**：nanoamp 自带一个最小的 FASTQ 读取器，因为 `ShortRead`
+> 会无条件引入 `pwalign`。手动装依赖时不必装它；`nanoamp doctor` 也不再检查它。
 
 ### 分组的安装命令（直接复制）
 
@@ -872,7 +1371,7 @@ install.packages(c("shiny", "DT"))
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 
 # 必需的核心包
-BiocManager::install(c("Biostrings", "IRanges", "Rsamtools", "ShortRead", "Matrix"))
+BiocManager::install(c("Biostrings", "IRanges", "Rsamtools", "Matrix"))
 
 # 可选但推荐：模式 B 的聚类引擎
 BiocManager::install("DECIPHER")
@@ -885,7 +1384,7 @@ BiocManager::install("pwalign")
 
 ```r
 install.packages(c("BiocManager", "data.table", "jsonlite", "optparse", "readxl", "shiny", "DT"))
-BiocManager::install(c("Biostrings", "IRanges", "Rsamtools", "ShortRead", "Matrix", "DECIPHER", "pwalign"))
+BiocManager::install(c("Biostrings", "IRanges", "Rsamtools", "Matrix", "DECIPHER", "pwalign"))
 ```
 
 装完再装本体：
@@ -1144,6 +1643,16 @@ res <- run_haplotype_analysis(
   outdir = "tmp/test_results/r/demo/E4-3_lean",
   keep_intermediates = FALSE
 )
+
+# 功能注释（可选）：annotation 给一个配置 JSON 的路径即启用
+res <- run_haplotype_analysis(
+  reads = "01_data/TSM20260826/E4-3/reads.fastq",
+  reference = "01_data/TSM20260826/E4-3/reference.self.fa",
+  outdir = "tmp/test_results/r/demo/E4-3_annot",
+  annotation = "02_code/r/inst/configs/example_cds.json",
+  annotation_detail = TRUE          # 同时写 variants_annotation.tsv
+)
+res$annotation                      # 每个「单倍型 × 转录本」一行的后果表
 ```
 
 ## 3.8 R 包相关排错
@@ -1265,7 +1774,13 @@ R 和外部程序在一些环节对非 ASCII 路径处理不好。
         │  ④ 按序列分组计数
         ▼
    12 种单倍型 ──> haplotypes.tsv（H1 33.3% / H2 31.5% / H3 26.8% …）
-                     └─ 其中 H2 = 目的序列 = 31.5%  ← 你要的答案
+        │            └─ 其中 H2 = 目的序列 = 31.5%  ← 你要的答案
+        │
+        │  ⑤ 功能注释（可选，默认不做）：把每条单倍型的变异翻译成后果
+        │     离线 CDS 路线不需要联网；在线 genome 路线需要联网
+        ▼
+   annotation.tsv（H1 的 218delG → 移码 p.Ala35fs；H2 无变异 p.(=) …）
+   variants_annotation.tsv（每个变异一行；加了 --annotation-detail 才有）
 ```
 
 # 附录 B：报错自查清单（三分钟版）
@@ -1306,6 +1821,8 @@ R 和外部程序在一些环节对非 ASCII 路径处理不好。
 | `02_code/r/README.md` | R 包完整教程（英文） |
 | `02_code/r/README-CN.md` | R 包完整教程（中文） |
 | `02_code/r/inst/docs/INSTALL_DEPENDENCIES-CN.md` | 依赖安装与排错 |
+| `02_code/r/inst/configs/README.md` | 功能注释配置字段说明与取坐标的方法 |
+| `02_code/shared/docs/output_schema.md` | **输出文件与字段的权威定义**（含注释产物、qc 指标、run_manifest 的 annotation 段） |
 | `03_dependence/README.md` | 内置工具与平台支持矩阵 |
 
 # 附录 D：已知限制（避免误会）
@@ -1313,10 +1830,30 @@ R 和外部程序在一些环节对非 ASCII 路径处理不好。
 1. **依赖 R**：图形界面 exe 只打包界面，不含 R 运行时。
 2. **GUI 冷启动约 1–3 秒**：单文件打包每次运行要解压到临时目录。
 3. **图形界面没有批量功能**：批量要用命令行的 `nanoamp batch`。
-4. **没有 GTF / CDS 功能注释**：不会判断移码 / 提前终止 / missense。
+4. **功能注释是选做步骤，两条路线的限制不同**：
+   - **离线 CDS 路线**（不联网）：CDS 长度必须是 3 的倍数，坐标要由使用者按自己的
+     扩增子给出（1-based，两端都算）。长度不对时**跳过该注释并记账**
+     （`qc.tsv` 的 `n_transcripts_skipped` / `annotation_skip_reason`，
+     `run_manifest.json` 的 `annotation.skipped_transcripts`），**退出码仍是 0**；
+     加 `--strict` 才会变成失败。
+   - **在线 genome 路线**（需联网）：需要能访问 Ensembl REST。扩增子不在内置 panel
+     （当前只有 ZNF8）时会退化为逐染色体扫描，**可能非常慢** —— 本教程的 E4-3
+     就没能在测试机上跑完；目的序列与 GRCh38 匹配不足（锚定覆盖率 < 0.9）时
+     **明确报错**，不会给出猜出来的坐标；网络不可达时**非零退出**，不会静默降级。
+   - 注释结果随 Ensembl release 变化（记录在 `run_manifest.json` 的
+     `annotation.ensembl_release`）；`protein_change` 是 HGVS **风格**但**未经 HGVS
+     认证**，不应作为临床报告依据。
+   - 注释**不新增任何 R 依赖包**，只多一个外部前提：系统里有 `curl.exe`
+     （Windows 10 1803 起自带；缺失时回退到 R 自带的下载能力，此时只有在线路线受影响）。
 5. **不做 basecalling**：输入必须是已经 basecall 过的 FASTQ。
 6. **比例是 reads 层面的估计，不是分子比例**：没有 UMI，无法区分 PCR 重复，
    纳米孔对不同长度序列也可能有捕获偏好。**低深度样本的置信区间会很宽**
    —— 本样本 438 条 reads，H2 的 95% 区间就有 27.2%–36.0% 那么宽，
    所以别把 31.5% 和 33.3% 的差别当成"真的不一样"。
-7. **本项目全程不使用 conda，也不使用 WSL。**
+7. **Mode A / C 逐字节可复现，Mode B 靠固定种子复现**：聚类引擎
+   `DECIPHER::Clusterize` 本身是随机算法（同一批 437 条 reads 连续调用会得到
+   38/38/35 个簇，即使只用 1 个线程）。nanoamp 在调用它之前固定随机种子，
+   并把种子写进 `qc.tsv` 的 `clustering_seed`（默认 42），所以 Mode B 现在
+   两次运行的 `haplotypes.tsv` 完全一致；这个种子只在那次调用期间生效，
+   不会影响你自己 R 会话的随机数。
+8. **本项目全程不使用 conda，也不使用 WSL。**

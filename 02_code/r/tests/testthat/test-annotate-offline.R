@@ -72,6 +72,11 @@ test_that("the cds route annotates substitutions, a deletion and the reference",
   expect_true(file.exists(file.path(out, "annotation.tsv")))
   expect_equal(res$qc$annotation_source, "cds-config")
   expect_equal(res$qc$annotation_available, TRUE)
+  # L10: the offline route has no authoritative protein to compare against, so
+  # the manifest must not claim that the reference protein was verified.
+  expect_length(res$manifest$transcripts, 1L)
+  expect_false(isTRUE(res$manifest$transcripts[[1]]$protein_verified))
+  expect_equal(res$manifest$transcripts[[1]]$cds_length, 81L)
 })
 
 test_that("a minus-strand cds config mirrors the plus-strand result", {
@@ -161,6 +166,38 @@ test_that("the bundled example configs are usable", {
   # the bundled example must describe a translatable CDS
   len <- as.integer(cds$cds$end) - as.integer(cds$cds$start) + 1L
   expect_equal(len %% 3L, 0L)
+})
+
+test_that("the candidate table (transcripts.tsv) is machine-readable", {
+  # `--list-transcripts` prints a human table and writes this one; the GUI builds
+  # its transcript picker from the file, so the shape is part of the contract.
+  ctx <- list(
+    genomic = list(chrom = "19", start = 100L, end = 200L, strand = "+"),
+    candidates = data.table::data.table(
+      transcript_id = c("ENST1", "ENST2"),
+      transcript_name = c("A", NA_character_),
+      biotype = c("protein_coding", "lncRNA"),
+      is_mane = c(TRUE, FALSE), is_canonical = c(TRUE, FALSE),
+      cds_overlap_bp = c(50L, NA_integer_)
+    )
+  )
+  t <- nanoamp:::annotation_candidates_table(ctx)
+  expect_equal(t$transcript_id, c("ENST1", "ENST2"))
+  expect_equal(t$name, c("A", "-"))
+  expect_equal(t$mane, c("MANE", ""))
+  expect_equal(t$canonical, c("canonical", ""))
+  expect_equal(t$chrom, c("19", "19"))
+  expect_equal(t$start, c(100L, 100L))
+  expect_equal(t$strand, c("+", "+"))
+
+  # An amplicon with no overlapping transcript must still produce the same
+  # columns, so the GUI never has to special-case an empty file.
+  empty <- nanoamp:::annotation_candidates_table(
+    list(genomic = NULL, candidates = NULL))
+  expect_equal(nrow(empty), 0L)
+  expect_true(all(c("transcript_id", "name", "biotype", "mane", "canonical",
+                    "chrom", "start", "end", "strand", "cds_overlap_bp") %in%
+                    names(empty)))
 })
 
 test_that("write_tsv keeps embedded newlines out of a machine-read table", {

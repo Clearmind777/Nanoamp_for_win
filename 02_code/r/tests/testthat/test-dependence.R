@@ -32,3 +32,41 @@ test_that("R-native aligner runs on a small synthetic dataset", {
   expect_true(nrow(res$haplotypes) >= 1)
   expect_equal(sum(res$haplotypes$count), 10)
 })
+
+test_that("Mode B clustering is reproducible and does not disturb the caller's RNG", {
+  skip_if_not_installed("DECIPHER")
+  # DECIPHER::Clusterize is stochastic: with identical input it returned
+  # different cluster sizes on consecutive calls (measured 38/38/35 for the same
+  # reads, and the same happens for the synthetic fixture below), so every
+  # Mode B result used to be unreproducible and functional-regression baselines
+  # could not be compared.
+  template <- make_random_seq(1000, seed = 7)
+  b <- strsplit(template, "")[[1]]
+  set.seed(3)
+  seqs <- c(
+    rep(paste(b[1:1000], collapse = ""), 200),
+    vapply(seq_len(300), function(i) {
+      n <- sample(500:1000, 1)
+      start <- sample(1:(length(b) - n + 1), 1)
+      x <- b[start:(start + n - 1)]
+      for (j in sample(seq_along(x), sample(8:20, 1))) {
+        x[j] <- sample(setdiff(c("A", "C", "G", "T"), x[j]), 1)
+      }
+      paste(x, collapse = "")
+    }, character(1))
+  )
+
+  set.seed(1)
+  a1 <- nanoamp:::cluster_sequences(seqs, identity_cutoff = 0.99, threads = 1L)
+  set.seed(999)
+  a2 <- nanoamp:::cluster_sequences(seqs, identity_cutoff = 0.99, threads = 1L)
+  # Same clusters no matter what the caller's RNG stream was doing.
+  expect_equal(a1$cluster, a2$cluster)
+  expect_gt(length(unique(a1$cluster)), 1L)
+
+  # The package must not reset the session's random stream.
+  set.seed(5)
+  before <- .Random.seed
+  nanoamp:::cluster_sequences(seqs, identity_cutoff = 0.99, threads = 1L)
+  expect_identical(.Random.seed, before)
+})

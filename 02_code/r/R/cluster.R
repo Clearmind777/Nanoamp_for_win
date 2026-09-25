@@ -2,6 +2,31 @@
 # Mode B: de novo clustering and cluster consensus
 # ---------------------------------------------------------------------------
 
+# DECIPHER's clustering is stochastic: repeated calls with *identical* input and
+# `processors = 1` return different cluster sizes (measured: 38/38/35 clusters
+# for the same 437 reads), which made every Mode B result unreproducible and
+# made functional-regression baselines impossible to compare. With a fixed seed
+# the same call is stable, so Mode B is seeded here and the seed is recorded in
+# qc.tsv (`clustering_seed`) and in run_manifest.json.
+#
+# The caller's RNG stream is saved and restored: a library must not silently
+# reset the random state of the session that called it.
+.nanoamp_cluster_seed <- 42L
+
+with_cluster_seed <- function(expr, seed = .nanoamp_cluster_seed) {
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  old <- if (had_seed) get(".Random.seed", envir = .GlobalEnv) else NULL
+  on.exit({
+    if (had_seed) {
+      assign(".Random.seed", old, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+  set.seed(seed)
+  force(expr)
+}
+
 greedy_cluster_from_distance <- function(dm, cutoff) {
   n <- nrow(dm)
   assigned <- rep(NA_integer_, n)
@@ -81,10 +106,11 @@ cluster_sequences <- function(seqs, identity_cutoff = 0.99, threads = 4L,
       dm <- as.matrix(d)
       exports <- getNamespaceExports("DECIPHER")
       if ("Clusterize" %in% exports) {
-        cl <- DECIPHER::Clusterize(
+        # Clusterize is the stochastic step (see with_cluster_seed above).
+        cl <- with_cluster_seed(DECIPHER::Clusterize(
           x, cutoff = cutoff, minCoverage = min_coverage,
           processors = threads, verbose = FALSE
-        )
+        ))
         clv <- as.integer(cl$cluster)
         names(clv) <- rownames(cl)
         clv <- clv[names(x)]
@@ -161,10 +187,10 @@ build_cluster_consensus <- function(seqs, idx, dm,
     ans <- tryCatch({
       x <- Biostrings::DNAStringSet(toupper(seqs[sub_idx]))
       names(x) <- sprintf("s%05d", seq_along(sub_idx))
-      aln <- DECIPHER::AlignSeqs(
+      aln <- with_cluster_seed(DECIPHER::AlignSeqs(
         x,
         processors = threads, verbose = FALSE
-      )
+      ))
       majority_consensus(aln)
     }, error = function(e) {
       log_warn("DECIPHER consensus failed; using medoid: ", conditionMessage(e))
@@ -195,11 +221,15 @@ run_mode_b <- function(reads_path, reference_path, outdir,
                        threads = 4L, keep_intermediates = TRUE,
                        ref_label = NULL, annotation = NULL,
                        list_transcripts = FALSE, annotation_proteins = FALSE,
-                       annotation_detail = FALSE) {
+                       annotation_detail = FALSE, strict = FALSE) {
   aligner <- match.arg(aligner, c("minimap2", "r"))
   outdir <- ensure_dir(outdir)
   ref <- read_reference(reference_path)
   n_total <- count_fastq_reads(reads_path)
+  if (n_total == 0L) {
+    nanoamp_abort(sprintf("FASTQ file contains no reads: %s", reads_path),
+                  class = "input")
+  }
   log_info("Mode B: ", basename(reads_path), " -> ", ref$name, " (", n_total, " reads)")
 
   prep <- prepare_alignment_data(
@@ -208,9 +238,18 @@ run_mode_b <- function(reads_path, reference_path, outdir,
   )
   aln <- prep$aln
   n_primary <- nrow(aln)
-  if (n_primary == 0) stop("Mode B: no aligned reads", call. = FALSE)
+  if (n_primary == 0) {
+    nanoamp_abort(paste0(
+      "Mode B: no aligned reads.\n",
+      "Nothing in this FASTQ aligns to the reference."
+    ), class = "input")
+  }
   kept <- filter_alignment_reads(aln, min_identity, min_ref_coverage)
-  if (nrow(kept) == 0) stop("Mode B: no reads left after filtering", call. = FALSE)
+  if (nrow(kept) == 0) {
+    nanoamp_abort(paste0(
+      "Mode B: no reads left after filtering (min_identity / min_ref_coverage)."
+    ), class = "input")
+  }
 
   read_vars <- prep$read_vars
   if (nrow(read_vars) > 0) read_vars <- read_vars[read_id %in% kept$read_id]
@@ -310,6 +349,9 @@ run_mode_b <- function(reads_path, reference_path, outdir,
     # (e.g. that the reads differ in length). Kept so the caveat survives the
     # run instead of living only in console output.
     clustering_note = cl$note %||% NA_character_,
+    # Recorded so a Mode B result can be reproduced: DECIPHER's clustering is
+    # stochastic and nanoamp seeds it (see with_cluster_seed).
+    clustering_seed = .nanoamp_cluster_seed,
     consensus_method = consensus_method,
     decipher_version = if (requireNamespace("DECIPHER", quietly = TRUE)) {
       as.character(utils::packageVersion("DECIPHER"))
@@ -330,17 +372,23 @@ run_mode_b <- function(reads_path, reference_path, outdir,
   # was requested but produced nothing (the skip reason must reach qc.tsv).
   if (!is.null(ann$qc)) qc <- c(qc, ann$qc)
   write_tsv(build_qc_table(qc), file.path(outdir, "qc.tsv"))
+  degraded <- annotation_degradation(ann)
+  strict_fields <- strict_manifest_fields(degraded, strict)
   run_manifest(outdir, "B", list(
     top_n = top_n, identity_cutoff = identity_cutoff,
     min_cluster_reads = min_cluster_reads, min_identity = min_identity,
     min_ref_coverage = min_ref_coverage, max_msa_seqs = max_msa_seqs,
     consensus_method = consensus_method, aligner = aligner, threads = threads
-  ), ref, qc, extra = c(list(reads_md5 = safe_md5(reads_path)),
-                        if (!is.null(ann$manifest)) list(annotation = ann$manifest)))
+  ), ref, qc,
+  status = if (length(strict_fields) > 0L) "failed" else "done",
+  extra = c(list(reads_md5 = safe_md5(reads_path)),
+            if (!is.null(ann$manifest)) list(annotation = ann$manifest),
+            strict_fields))
 
   if (!isTRUE(keep_intermediates) && !is.null(prep$bam)) {
     unlink(c(prep$bam, paste0(prep$bam, ".bai"), paste0(prep$bam, ".minimap2.log")))
   }
   invisible(list(haplotypes = clusters, variants = var_rows, qc = qc,
-                 annotation = ann$table))
+                 annotation = ann$table,
+                 strict_failure = if (isTRUE(strict)) degraded else NULL))
 }

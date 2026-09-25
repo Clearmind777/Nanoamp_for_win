@@ -66,7 +66,7 @@ nanoamp-windows/            ← 解压到同一个地方（两个 zip 会自动�
 ## 重新生成资产
 
 ```powershell
-# 1. R 包 tarball（含当前源码，例如 align.R 的路径修复）
+# 1. R 包 tarball（含当前源码：路径修复与功能注释都在里面）
 R CMD build 02_code/r --no-build-vignettes
 copy nanoamp_0.1.0.tar.gz release\01_R-package\
 
@@ -154,6 +154,43 @@ gh release create v0.1.5 `
 不再需要时，双击 **`uninstall.exe`** 卸载。
 
 详细的图文步骤见[仓库根目录的 README.md](../README.md)，以及各版本自己的 README。
+
+## 本版包含的功能注释（可选）
+
+`01_R-package/nanoamp_0.1.0.tar.gz` 与 `03_GUI/nanoamp.exe` 都包含**可选的功能注释**：
+GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就会把每条单倍型的变异
+翻译成生物学后果，并多写 `annotation.tsv`（每个「单倍型 × 转录本」一行）与
+`variants_annotation.tsv`（每个变异一行）。**不启用时输出与以前逐字节一致**
+（有测试锁定这一点）。
+
+- **不新增 R 依赖包**：注释复用已装的 Biostrings / jsonlite。包里自带两个示例配置
+  （`example_cds.json` / `example_online.json`），**安装器会把它们复制到
+  `<安装目录>\configs\`**（包里也留一份，`nanoamp doctor` 打印的 `configs` 一行是包里那份）；
+- **两条路线**：`cds`（离线，自己给 CDS 坐标，长度须为 3 的倍数）与 `genome`
+  （联网，程序在 GRCh38 定位扩增子并从 Ensembl 取转录本结构）。离线路线不需要网络；
+  在线路线用系统的 `curl.exe`（Windows 10 1803 起自带）；
+- **缓存**：参考序列切片缓存在 `%LOCALAPPDATA%\nanoamp\cache\ref`
+  （可用 `--cache-dir` 或环境变量 `NANOAMP_CACHE_DIR` 改；`--no-cache` 本次跳过缓存，
+  `--clear-cache` 清空）；
+- **跳过与失败都会被记账**：注释被跳过时**退出码仍是 0**，原因写在 `qc.tsv` 的
+  `annotation_skip_reason` 与 `run_manifest.json` 的 `annotation.skipped_transcripts`；
+  加 `--strict` 可把它变成失败。在线路线取不到数据时会直接非零退出，不会静默降级。
+- **失败的运行也留下档案**：`run_manifest.json` 现在有 `status`（`done`/`failed`/
+  `cancelled`）、`error_class`（`input`/`environment`/`network`/`internal`）、
+  `error_message` 与 `log_path`（`nanoamp.log`），GUI 按 `error_class` 给出对应的
+  "怎么办"提示，而不再是一句通用报错；
+- **GUI 新增**：「列出转录本」按钮（结果填进「转录本」下拉框，可指定某个 ENST）、
+  「复制诊断信息」按钮（把运行日志整段复制到剪贴板）。
+
+`make functional-test` 会用 `01_data/` 里 168 个真实运行与提交在
+`03_dependence/baselines/functional/` 的基线逐行对比（Mode B 也逐字节一致，
+因为随机聚类已固定种子）；`make stress-test` 跑环境压力矩阵（离线/代理/缓存损坏/
+路径含空格与中文/超长路径/取消/并发等），两条命令都会在失败时以非零状态退出。
+
+因此**发布资产的数量与布局没有任何变化**：仍然是
+`nanoamp-0.1.5-windows-setup.zip`（安装器 + R 包 + GUI + minimap2 + 在线安装用的
+固定版本清单）加上可选的 `nanoamp-0.1.0-windows-offline-deps.zip`（离线依赖）。
+重建资产后 `_build/SHA256SUMS.txt` 里 setup 包的 sha256 会随之更新。
 
 ## 安装时可以修改的选项
 
@@ -293,4 +330,14 @@ python release\_installer\test_locked_file_retry.py  # 卸载时文件被占用�
 python release\_installer\test_copy_retry.py         # 安装时目标文件被占用会重试后报错
 python release\_installer\test_r_version_choice.py   # 系统 R 与随包 R 的选择规则
 python release\_installer\test_pinned_deps.py        # 固定版本清单、选源、minimap2 来源
+```
+
+发布前的三条整体验证（都会在失败时以非零状态退出）：
+
+```powershell
+Rscript 03_dependence\r-environment\run_tests.R          # testthat：39 个用例
+python   02_code\PythonGUI\tests\test_annotation_gui.py  # 注释界面与容错
+python   02_code\PythonGUI\tests\test_failure_reporting.py
+make functional-test    # 168 个真实运行 vs 提交的基线
+make stress-test        # 环境压力矩阵（A 组需要联网）
 ```

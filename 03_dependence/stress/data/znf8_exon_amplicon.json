@@ -1,0 +1,19 @@
+{
+  "gene": "ZNF8",
+  "gene_id": "ENSG00000278129",
+  "transcript_id": "ENST00000621650",
+  "transcript_name": "ZNF8-201",
+  "is_canonical": true,
+  "chrom": "19",
+  "strand": "+",
+  "region_start": 58294617,
+  "region_end": 58295016,
+  "length": 400,
+  "cds_start": 58279082,
+  "cds_end": 58295536,
+  "exon_id": "ENSE00003723656",
+  "exon_start": 58294098,
+  "exon_end": 58302791,
+  "source": "Ensembl REST (rest.ensembl.org), retrieved 2026-09-26",
+  "purpose": "Amplicon used by 03_dependence/stress group A: it is a real GRCh38 slice inside a coding exon of the canonical ZNF8 transcript, so the genome route can locate it through the built-in panel without scanning a whole chromosome."
+}

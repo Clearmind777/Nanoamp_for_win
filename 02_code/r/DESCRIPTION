@@ -17,7 +17,6 @@ Imports:
     IRanges,
     Matrix,
     Rsamtools,
-    ShortRead,
     data.table,
     jsonlite,
     methods,

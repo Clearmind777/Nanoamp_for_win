@@ -20,6 +20,7 @@ import tempfile
 import threading
 import traceback
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import tkinter as tk
@@ -42,9 +43,43 @@ ANNOTATION_ONLINE = "在线 genome（需联网，用 Ensembl）"
 ANNOTATION_CUSTOM = "自定义 JSON…"
 ANNOTATION_SOURCES = [ANNOTATION_OFFLINE, ANNOTATION_ONLINE, ANNOTATION_CUSTOM]
 
+# Transcript picker: the first entry means "let nanoamp choose" (MANE Select,
+# else Ensembl canonical). The rest are filled in by 「列出转录本」.
+TRANSCRIPT_AUTO = "自动选择（MANE / 规范）"
+
 # Kept in step with the geometry set in main(); used for label wrapping.
 WINDOW_WIDTH = 1040
 WINDOW_MIN_HEIGHT = 600
+
+# run_manifest.json carries `error_class` for a failed run (P0-7). The GUI turns
+# that single word into "what do I do now", instead of showing the same generic
+# dialog for a typo in a path and for a firewall blocking Ensembl.
+ERROR_CLASS_HINTS = {
+    "input": (
+        "输入或配置有问题。\n\n"
+        "请检查：FASTQ / FASTA 是否选对且文件存在；注释配置是否为合法 JSON、"
+        "CDS 长度是否为 3 的倍数。"
+    ),
+    "environment": (
+        "运行环境有问题（R 包、外部工具或磁盘/权限）。\n\n"
+        "请先点「环境自检」确认 R、依赖包与 minimap2；确认输出目录可写、"
+        "磁盘未满；必要时重新运行安装器。"
+    ),
+    "network": (
+        "网络不可达——在线注释需要访问 Ensembl。\n\n"
+        "可以改用「离线 CDS（不联网）」配置再跑一次（不需要网络）；"
+        "或者检查代理/防火墙后重试，必要时用 --cache-dir 指定缓存目录。"
+    ),
+    "internal": (
+        "nanoamp 自身的错误（含自检不通过）。\n\n"
+        "请把「运行日志」和输出目录里的 run_manifest.json 一起反馈。"
+    ),
+}
+
+ERROR_CLASS_FALLBACK = (
+    "分析未正常结束。常见原因为 R 包未安装、minimap2 不可用或输入文件有问题。\n\n"
+    "详见「运行日志」；输出目录里的 run_manifest.json 记录了失败原因。"
+)
 
 
 def resource_base() -> Path:
@@ -162,6 +197,10 @@ class NanoampApp(ttk.Frame):
         self.var_annot_proteins = tk.BooleanVar(value=False)
         self.var_annot_detail = tk.BooleanVar(value=True)
         self.var_annot_hint = tk.StringVar(value="")
+        self.var_annot_transcript = tk.StringVar(value=TRANSCRIPT_AUTO)
+        # Transcript rows fetched by 「列出转录本」, kept so the picker survives a
+        # re-render and so tests can assert on the parsed table.
+        self.transcript_choices: list[str] = []
 
         self._build_layout()
         self._detect_environment()
@@ -217,6 +256,11 @@ class NanoampApp(ttk.Frame):
         ttk.Spinbox(opts, from_=1, to=1000, width=6, textvariable=self.var_topn).pack(
             side="left", padx=(6, 0)
         )
+        # The switch that turns functional annotation on. It lives here (not in
+        # the annotation panel) because the panel itself is hidden while
+        # annotation is off - without this the panel could never be reached.
+        ttk.Checkbutton(opts, text="功能注释…",
+                        variable=self.var_annot_on).pack(side="left", padx=(16, 0))
 
         # -- functional annotation (optional, off by default)
         self._build_annotation_group()
@@ -241,6 +285,11 @@ class NanoampApp(ttk.Frame):
         self.btn_run.grid(row=0, column=0)
         self.btn_doctor = ttk.Button(actions, text="环境自检", command=self._on_doctor)
         self.btn_doctor.grid(row=0, column=1, padx=(6, 0))
+        # Copying the log is how a user reports a problem: the window is the only
+        # place R's output is shown, so there must be a way to get it out.
+        self.btn_copy_diag = ttk.Button(actions, text="复制诊断信息",
+                                        command=self._on_copy_diagnostics)
+        self.btn_copy_diag.grid(row=0, column=2, padx=(6, 0))
         # Enabled only while R is running; stops the analysis.
         self.btn_cancel = ttk.Button(actions, text="取消操作", command=self._on_cancel,
                                      state="disabled")
@@ -309,10 +358,28 @@ class NanoampApp(ttk.Frame):
         self.chk_annot_proteins = ttk.Checkbutton(
             box, text="输出蛋白序列", variable=self.var_annot_proteins)
         self.chk_annot_proteins.grid(row=3, column=2, sticky="w", pady=(4, 0))
+
+        # Transcript picker. The list is empty until 「列出转录本」 asks Ensembl
+        # which transcripts overlap the amplicon, so the only entry at first is
+        # "let nanoamp choose" - which is what the offline route always does.
+        pick = ttk.Frame(box)
+        pick.grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self._annot_pick_row = pick
+        ttk.Label(pick, text="转录本").pack(side="left")
+        self.box_annot_transcript = ttk.Combobox(
+            pick, state="readonly", width=34, values=[TRANSCRIPT_AUTO],
+            textvariable=self.var_annot_transcript)
+        self.box_annot_transcript.pack(side="left", padx=(6, 8))
+        self.btn_list_transcripts = ttk.Button(
+            pick, text="列出转录本", command=self._on_list_transcripts)
+        self.btn_list_transcripts.pack(side="left")
+        ttk.Label(pick, text="（在线路线：先列出再挑一个）",
+                  foreground="#555555").pack(side="left", padx=(8, 0))
+
         self.lbl_annot_hint = ttk.Label(box, textvariable=self.var_annot_hint,
                                         foreground="#7a5c00",
                                         wraplength=WINDOW_WIDTH - 90, justify="left")
-        self.lbl_annot_hint.grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.lbl_annot_hint.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
         # The whole panel is hidden while annotation is off: the default window
         # is 720 px tall and must keep the results area and buttons in view.
         self._annot_hidden = [box]
@@ -324,7 +391,8 @@ class NanoampApp(ttk.Frame):
 
     def _annotation_widgets(self) -> list:
         return [self.entry_cds_start, self.entry_cds_end, self.box_cds_strand,
-                self.box_cds_frame, self.btn_annot_browse]
+                self.box_cds_frame, self.btn_annot_browse,
+                self.box_annot_transcript, self.btn_list_transcripts]
 
     def _sync_annotation_state(self) -> None:
         """Show/hide the optional rows, enable/disable, keep the hint in sync."""
@@ -340,16 +408,26 @@ class NanoampApp(ttk.Frame):
 
         cds_widgets = (self.entry_cds_start, self.entry_cds_end,
                        self.box_cds_strand, self.box_cds_frame)
+        # The transcript picker only means something on the online route: the
+        # offline route annotates the CDS span the user typed, where there is no
+        # transcript list to choose from.
+        picker_widgets = (self.box_annot_transcript, self.btn_list_transcripts)
         for w in self._annotation_widgets():
             if not on:
                 state = "disabled"
             elif w in cds_widgets and not offline:
+                state = "disabled"
+            elif w in picker_widgets and offline:
                 state = "disabled"
             else:
                 state = "normal"
             if isinstance(w, ttk.Combobox):
                 state = "readonly" if state == "normal" else "disabled"
             w.configure(state=state)
+        if offline and self.var_annot_transcript.get() != TRANSCRIPT_AUTO:
+            # A transcript id left over from the online route must not be passed
+            # with a cds config, where it would be meaningless.
+            self.var_annot_transcript.set(TRANSCRIPT_AUTO)
 
         if not on:
             self.var_annot_hint.set("")
@@ -440,9 +518,17 @@ class NanoampApp(ttk.Frame):
             cfg = _configured_paths()
             rlib = cfg.get("rlib")
             if rlib:
+                # Where the package keeps its own copy...
                 candidates.insert(0, Path(rlib) / "nanoamp" / "configs" / name)
+            home = cfg.get("home")
+            if home:
+                # ...and the copy install.exe puts where a user can find it.
+                candidates.insert(0, Path(home) / "configs" / name)
         except Exception:  # noqa: BLE001 - discovery is best effort
             pass
+        env_home = os.environ.get("NANOAMP_HOME")
+        if env_home:
+            candidates.insert(0, Path(env_home) / "configs" / name)
         for cand in candidates:
             if cand.is_file():
                 return cand
@@ -718,6 +804,9 @@ class NanoampApp(ttk.Frame):
         ]
         if annot_cfg is not None:
             argv += ["--annotate-config", str(annot_cfg)]
+            transcript = self._selected_transcript_id()
+            if transcript:
+                argv += ["--transcript", transcript]
             if self.var_annot_detail.get():
                 argv.append("--annotation-detail")
             if self.var_annot_proteins.get():
@@ -751,10 +840,129 @@ class NanoampApp(ttk.Frame):
         )
         self.worker.start()
 
+    def _selected_transcript_id(self) -> str:
+        """The transcript id to pass as --transcript, or "" for automatic."""
+        value = self.var_annot_transcript.get().strip()
+        if not value or value == TRANSCRIPT_AUTO:
+            return ""
+        return value.split()[0]
+
+    def _on_list_transcripts(self) -> None:
+        """Ask Ensembl which transcripts overlap the amplicon.
+
+        Uses the same CLI entry point as everything else (mode A analysis plus
+        `--list-transcripts`), so the GUI cannot disagree with the command line.
+        The rows come back as transcripts.tsv, which is what makes the picker a
+        real picker instead of a hint to go read the log.
+        """
+        if self.worker and self.worker.is_alive():
+            return
+        reads = self.var_reads.get().strip()
+        reference = self.var_reference.get().strip()
+        for label, path in (("测序文件", reads), ("目的序列", reference)):
+            if not path or not Path(path).is_file():
+                messagebox.showwarning("输入不完整", f"请先选择{label}（列出转录本需要扩增子序列）。")
+                return
+        annot_cfg, problem = self._annotation_config_path()
+        if problem:
+            messagebox.showwarning("注释配置不完整", problem)
+            return
+        if annot_cfg is None:
+            messagebox.showinfo("需要注释配置",
+                                "请先勾选「功能注释…」并选择配置来源（在线 genome 或自定义）。")
+            return
+        if self.runner is None:
+            try:
+                self.runner = NanoampRunner(self.repo_root)
+            except RNotFoundError as exc:
+                messagebox.showerror("R 不可用", str(exc))
+                return
+        outdir = Path(tempfile.gettempdir()) / f"nanoamp_gui_transcripts_{os.getpid()}"
+        argv = [
+            "call", "--reads", reads, "--reference", reference,
+            "--outdir", str(outdir), "--mode", "A",
+            "--annotate-config", str(annot_cfg), "--list-transcripts",
+        ]
+        self._cancel_requested = False
+        self._set_running(True)
+        self._append_log("")
+        self._append_log("$ nanoamp " + " ".join(argv))
+        self.worker = threading.Thread(
+            target=self._list_transcripts_worker, args=(argv, outdir), daemon=True
+        )
+        self.worker.start()
+
+    def _list_transcripts_worker(self, argv: list[str], outdir: Path) -> None:
+        assert self.runner is not None
+        try:
+            code, _ = self.runner.run(argv, stream=self._emit)
+        except Exception:
+            self._emit(traceback.format_exc())
+            code = 1
+        self.log_queue.put(("__transcripts_done__", code, outdir))
+
+    def _finish_transcripts(self, code: int, outdir: Path) -> None:
+        self._set_running(False)
+        if code != 0:
+            self.var_status.set("列出转录本失败。详见运行日志。")
+            return
+        rows = self._load_transcript_rows(outdir)
+        if not rows:
+            self.var_status.set("没有找到与该扩增子重叠的转录本（见运行日志）。")
+            return
+        self.transcript_choices = [r["transcript_id"] for r in rows
+                                   if r.get("transcript_id")]
+        values = [TRANSCRIPT_AUTO] + self.transcript_choices
+        self.box_annot_transcript.configure(values=values)
+        self.var_annot_transcript.set(TRANSCRIPT_AUTO)
+        mane = [r for r in rows if NanoampApp._cell(r, "mane").upper() == "MANE"]
+        for row in rows:
+            self._append_log("[GUI] {} {} {} {} {}".format(
+                row.get("transcript_id", ""), row.get("name", ""),
+                row.get("biotype", ""), row.get("mane", ""),
+                row.get("canonical", "")))
+        self.var_status.set(
+            f"找到 {len(rows)} 个重叠转录本"
+            + (f"，其中 {len(mane)} 个 MANE Select" if mane else "")
+            + "。默认自动选择；也可在上方「转录本」里指定一个。"
+        )
+
+    @staticmethod
+    def _load_transcript_rows(outdir: Path) -> list[dict[str, str]]:
+        path = Path(outdir) / "transcripts.tsv"
+        if not path.is_file():
+            return []
+        _fields, rows, error = NanoampApp._read_tsv_safe(path)
+        return [] if error else rows
+
     def _on_open_outdir(self) -> None:
         if not self.last_outdir or not self.last_outdir.is_dir():
             return
         self._open_path(self.last_outdir)
+
+    def _on_copy_diagnostics(self) -> None:
+        """Put the log (which includes doctor output) on the clipboard."""
+        text = self.log_text.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo(
+                "没有可复制的信息",
+                "运行日志还是空的。先点「环境自检」，或在失败后重试一次分析。",
+            )
+            return
+        header = [
+            f"nanoamp GUI：{APP_TITLE}",
+            f"仓库根目录: {self.repo_root}",
+            f"Rscript: {self.runner.rscript if self.runner else '(未检测)'}",
+            "--- 运行日志 ---",
+        ]
+        try:
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(header) + "\n" + text)
+            self.update_idletasks()
+        except tk.TclError as exc:
+            messagebox.showerror("复制失败", str(exc))
+            return
+        self.var_status.set("诊断信息已复制到剪贴板。")
 
     def _on_open_file(self, _event) -> None:
         sel = self.files_tree.selection()
@@ -802,6 +1010,8 @@ class NanoampApp(ttk.Frame):
                     kind, code, outdir = item
                     if kind == "__done__":
                         self._finish_run(code, outdir)
+                    elif kind == "__transcripts_done__":
+                        self._finish_transcripts(code, outdir)
                     else:
                         self._finish_doctor(code)
                 else:
@@ -856,8 +1066,11 @@ class NanoampApp(ttk.Frame):
         self.last_outdir = outdir
         if self._cancel_requested:
             # A cancelled run is not a failure: say what happened and where the
-            # partial output is, instead of the generic error dialog.
+            # partial output is, instead of the generic error dialog. The
+            # manifest is marked so that the directory does not look like a
+            # completed run later on.
             self._cancel_requested = False
+            self._mark_cancelled(outdir)
             self.var_status.set(f"分析已取消。部分结果保留在：{outdir}")
             if outdir.is_dir():
                 self.btn_open.configure(state="normal")
@@ -868,12 +1081,7 @@ class NanoampApp(ttk.Frame):
             )
             return
         if code != 0:
-            self.var_status.set(f"分析失败（退出码 {code}）。详见运行日志。")
-            messagebox.showerror(
-                "分析失败",
-                "分析未正常结束。常见原因为 R 包未安装或 minimap2 不可用，"
-                "详见运行日志。",
-            )
+            self._report_failure(code, outdir)
             return
         self.btn_open.configure(state="normal")
         self._load_results(outdir)
@@ -903,11 +1111,114 @@ class NanoampApp(ttk.Frame):
             widget.insert("1.0", value)
         widget.configure(state="disabled")
 
+    # --------------------------------------------------- failure reporting
+    @staticmethod
+    def _read_manifest(outdir: Path) -> dict:
+        """run_manifest.json as a dict, or {} when it is missing/unreadable."""
+        path = Path(outdir) / "run_manifest.json"
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _failure_hint(manifest: dict) -> tuple[str, str]:
+        """(error_class, hint) for a failed run's manifest."""
+        cls = str(manifest.get("error_class") or "").strip()
+        return cls, ERROR_CLASS_HINTS.get(cls, ERROR_CLASS_FALLBACK)
+
+    def _report_failure(self, code: int, outdir: Path) -> None:
+        """Explain a failed run using its manifest instead of a generic dialog.
+
+        R writes run_manifest.json (status/error_class/error_message) even when
+        the analysis dies, so the user gets a class-specific next step - and the
+        file stays readable after the window is closed.
+        """
+        manifest = self._read_manifest(outdir)
+        cls, hint = self._failure_hint(manifest)
+        message = str(manifest.get("error_message") or "").strip()
+        label = {"input": "输入错误", "environment": "环境问题",
+                 "network": "网络问题", "internal": "内部错误"}.get(cls)
+        if label:
+            self.var_status.set(f"分析失败（退出码 {code}，{label}）。详见运行日志。")
+        else:
+            self.var_status.set(f"分析失败（退出码 {code}）。详见运行日志。")
+        if cls:
+            self._append_log(f"[GUI] 失败分类：{cls}")
+        if message:
+            self._append_log("[GUI] " + message.replace("\n", " "))
+        self._append_log(f"[GUI] {hint.splitlines()[0]}")
+        detail = f"\n\nR 报告的失败原因：\n{message}" if message else ""
+        messagebox.showerror(
+            "分析失败",
+            f"{hint}{detail}\n\n输出目录：{outdir}",
+        )
+
+    def _mark_cancelled(self, outdir: Path) -> None:
+        """Record a cancelled run in run_manifest.json (best effort).
+
+        R cannot write this itself: cancelling kills the R process, so the
+        manifest it wrote (if any) would still say "done" or would be missing.
+        The GUI is the only component that knows the run was cancelled, so it
+        keeps the directory from looking like a completed analysis.
+        """
+        if not outdir.is_dir():
+            return
+        info = self._read_manifest(outdir)
+        info["status"] = "cancelled"
+        info["cancelled_by"] = "gui"
+        info["cancelled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            (Path(outdir) / "run_manifest.json").write_text(
+                json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            self._append_log(f"[GUI] 无法写入取消状态：{exc}")
+
     @staticmethod
     def _read_tsv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
         with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
             reader = csv.DictReader(fh, delimiter="\t")
             return list(reader.fieldnames or []), list(reader)
+
+    @staticmethod
+    def _read_tsv_safe(path: Path) -> tuple[list[str], list[dict[str, str]], str]:
+        """[fields, rows, error]; a file that cannot be read is not fatal.
+
+        A truncated or hand-edited results file must produce a readable message
+        in the window, never a traceback (the user cannot fix a crash).
+        """
+        try:
+            fields, rows = NanoampApp._read_tsv(path)
+            return fields, rows, ""
+        except (OSError, csv.Error, UnicodeError) as exc:
+            return [], [], f"{type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _cell(row: dict, key: str) -> str:
+        """A TSV cell as text: a short/garbled row yields "" instead of None."""
+        value = row.get(key)
+        return "" if value is None else str(value)
+
+    def _insert_row(self, tree: tk.ttk.Treeview, iid: str | None, values) -> bool:
+        """Insert one table row, tolerating duplicate or invalid row ids."""
+        try:
+            if iid is None:
+                tree.insert("", "end", values=values)
+            else:
+                tree.insert("", "end", iid=iid, values=values)
+            return True
+        except tk.TclError:
+            # Duplicate iid: fall back to an anonymous row so the data is still
+            # shown rather than the whole table being lost.
+            try:
+                tree.insert("", "end", values=values)
+                return True
+            except tk.TclError:
+                return False
 
     def _load_results(self, outdir: Path) -> None:
         self._load_haplotypes(outdir / "haplotypes.tsv")
@@ -932,11 +1243,10 @@ class NanoampApp(ttk.Frame):
         qc = {}
         qc_path = outdir / "qc.tsv"
         if qc_path.is_file():
-            try:
-                _f, rows = self._read_tsv(qc_path)
-                qc = {r.get("metric", ""): r.get("value", "") for r in rows}
-            except OSError:
-                qc = {}
+            _f, rows, qc_error = self._read_tsv_safe(qc_path)
+            qc = {self._cell(r, "metric"): self._cell(r, "value") for r in rows}
+            if qc_error:
+                self._append_log(f"[GUI] qc.tsv 读取失败：{qc_error}")
 
         requested = qc.get("annotation_enabled", "").upper() == "TRUE"
         available = qc.get("annotation_available", "").upper() == "TRUE"
@@ -953,19 +1263,32 @@ class NanoampApp(ttk.Frame):
             return
 
         rows = []
-        if ann_path.is_file():
-            _f, rows = self._read_tsv(ann_path)
+        if ann_path.exists():
+            if not ann_path.is_file():
+                self.annot_status.set(
+                    f"annotation.tsv 不是普通文件，无法显示：{ann_path}")
+                self._append_log(f"[GUI] {self.annot_status.get()}")
+                self.var_annot_status.set("annotation.tsv 无法读取。")
+                return
+            _f, rows, ann_error = self._read_tsv_safe(ann_path)
+            if ann_error or not _f:
+                # A malformed result file must not crash the window: say what is
+                # wrong and keep the rest of the results usable.
+                why = ann_error or "表头为空（文件不是制表符分隔的表）"
+                self.annot_status.set(f"annotation.tsv 不符合契约，无法显示：{why}")
+                self._append_log(f"[GUI] {self.annot_status.get()}")
+                self.var_annot_status.set("annotation.tsv 无法读取。")
+                return
             for r in rows:
-                self.annot_tree.insert(
-                    "", "end",
-                    iid=f"{r.get('haplotype_id','')}|{r.get('transcript_id','')}",
-                    values=(r.get("haplotype_id", ""), r.get("transcript_id", ""),
-                            r.get("consequence_zh", ""),
-                            r.get("consequence_any_transcript_zh", ""),
-                            {"TRUE": "是", "FALSE": "否"}.get(
-                                r.get("transcript_conflict", "").upper(),
-                                r.get("transcript_conflict", "")),
-                            r.get("protein_change", ""), r.get("variants", "")),
+                conflict = self._cell(r, "transcript_conflict")
+                self._insert_row(
+                    self.annot_tree,
+                    f"{self._cell(r, 'haplotype_id')}|{self._cell(r, 'transcript_id')}",
+                    (self._cell(r, "haplotype_id"), self._cell(r, "transcript_id"),
+                     self._cell(r, "consequence_zh"),
+                     self._cell(r, "consequence_any_transcript_zh"),
+                     {"TRUE": "是", "FALSE": "否"}.get(conflict.upper(), conflict),
+                     self._cell(r, "protein_change"), self._cell(r, "variants")),
                 )
         n_ann = qc.get("n_transcripts_annotated", "")
         n_skip = qc.get("n_transcripts_skipped", "")
@@ -983,18 +1306,22 @@ class NanoampApp(ttk.Frame):
         self._append_log("[GUI] " + self.annot_status.get())
 
         if detail_path.is_file():
-            _f, drows = self._read_tsv(detail_path)
-            for r in drows:
-                self.var_annot_tree.insert(
-                    "", "end",
-                    values=(r.get("haplotype_id", ""), r.get("type", ""),
-                            r.get("genome_pos", ""), r.get("cds_pos", ""),
-                            r.get("ref", ""), r.get("alt", ""),
-                            r.get("codon_ref", ""), r.get("codon_alt", ""),
-                            r.get("aa_ref", ""), r.get("aa_alt", ""),
-                            r.get("consequence_zh", "")),
-                )
-            self.var_annot_status.set(f"{len(drows)} 条变异级后果。")
+            _f, drows, det_error = self._read_tsv_safe(detail_path)
+            if det_error:
+                self.var_annot_status.set(
+                    f"variants_annotation.tsv 不符合契约，无法显示：{det_error}")
+            else:
+                for r in drows:
+                    self._insert_row(
+                        self.var_annot_tree, None,
+                        (self._cell(r, "haplotype_id"), self._cell(r, "type"),
+                         self._cell(r, "genome_pos"), self._cell(r, "cds_pos"),
+                         self._cell(r, "ref"), self._cell(r, "alt"),
+                         self._cell(r, "codon_ref"), self._cell(r, "codon_alt"),
+                         self._cell(r, "aa_ref"), self._cell(r, "aa_alt"),
+                         self._cell(r, "consequence_zh")),
+                    )
+                self.var_annot_status.set(f"{len(drows)} 条变异级后果。")
         elif self.var_annot_detail.get():
             self.var_annot_status.set(
                 "没有 variants_annotation.tsv：可能是本次没有落入 CDS 的变异，"
@@ -1016,37 +1343,45 @@ class NanoampApp(ttk.Frame):
         if not path.is_file():
             self._append_log(f"[GUI] 未找到 {path.name}")
             return
-        _fields, rows = self._read_tsv(path)
+        _fields, rows, error = self._read_tsv_safe(path)
+        if error:
+            self.var_status.set(f"{path.name} 不符合契约，无法显示：{error}")
+            self._append_log(f"[GUI] {self.var_status.get()}")
+            return
         for row in rows:
-            prop = row.get("proportion", "")
+            prop = self._cell(row, "proportion")
             try:
                 prop_txt = f"{float(prop):.2%}"
             except (TypeError, ValueError):
                 prop_txt = prop
-            ref = row.get("is_reference", "")
+            ref = self._cell(row, "is_reference")
             ref_txt = {"TRUE": "是", "FALSE": "否"}.get(ref.upper(), ref)
-            self.tree.insert(
-                "", "end",
-                iid=row.get("haplotype_id", ""),
-                values=(
-                    row.get("rank", ""),
-                    row.get("haplotype_id", ""),
-                    row.get("count", ""),
+            self._insert_row(
+                self.tree,
+                self._cell(row, "haplotype_id") or None,
+                (
+                    self._cell(row, "rank"),
+                    self._cell(row, "haplotype_id"),
+                    self._cell(row, "count"),
                     prop_txt,
                     ref_txt,
-                    row.get("n_snv", ""),
-                    row.get("n_ins", ""),
-                    row.get("n_del", ""),
-                    row.get("length", ""),
-                    row.get("variants", ""),
+                    self._cell(row, "n_snv"),
+                    self._cell(row, "n_ins"),
+                    self._cell(row, "n_del"),
+                    self._cell(row, "length"),
+                    self._cell(row, "variants"),
                 ),
             )
 
     def _load_qc(self, path: Path) -> None:
         if not path.is_file():
             return
-        _fields, rows = self._read_tsv(path)
-        lines = [f"{r.get('metric', ''):<24} {r.get('value', '')}" for r in rows]
+        _fields, rows, error = self._read_tsv_safe(path)
+        if error:
+            self._set_text(self.qc_text, f"qc.tsv 不符合契约，无法显示：{error}")
+            self._append_log(f"[GUI] qc.tsv 不符合契约：{error}")
+            return
+        lines = [f"{self._cell(r, 'metric'):<24} {self._cell(r, 'value')}" for r in rows]
         self._set_text(self.qc_text, "\n".join(lines))
 
     def _load_files(self, outdir: Path) -> None:

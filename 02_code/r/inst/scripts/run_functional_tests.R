@@ -9,7 +9,6 @@ suppressPackageStartupMessages({
   library(data.table)
   library(Biostrings)
   library(Rsamtools)
-  library(ShortRead)
   library(optparse)
   library(nanoamp)
 })

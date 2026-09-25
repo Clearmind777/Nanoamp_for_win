@@ -14,7 +14,12 @@ run_mode_c <- function(reads_path, reference_path, outdir,
     log_warn("Mode C counts raw reads only; functional annotation is not run")
   }
   log_info("Mode C: ", basename(reads_path), " -> ", ref$name, " (", nrow(fq), " reads)")
-  if (nrow(fq) == 0) stop("Mode C: FASTQ is empty", call. = FALSE)
+  if (nrow(fq) == 0) {
+    # Classified: an empty input file is the user's problem, and the message
+    # says which file instead of leaving "no reads" to be guessed at.
+    nanoamp_abort(sprintf("FASTQ file contains no reads: %s", reads_path),
+                  class = "input")
+  }
 
   ref_rc <- reverse_complement(ref$sequence)
   exact_fwd <- fq$sequence == ref$sequence

@@ -28,7 +28,8 @@ run_haplotype_analysis(
   annotation = NULL,
   list_transcripts = FALSE,
   annotation_proteins = FALSE,
-  annotation_detail = FALSE
+  annotation_detail = FALSE,
+  strict = FALSE
 )
 }
 \arguments{
@@ -86,6 +87,10 @@ printed and no analysis is run.}
 
 \item{annotation_detail}{Also write `variants_annotation.tsv` with the
 per-variant consequences.}
+
+\item{strict}{When TRUE, an annotation that had to skip transcripts makes the
+run fail (non-zero exit, `status = "failed"` in `run_manifest.json`) instead
+of being recorded as a degradation. Off by default.}
 }
 \value{
 A list with `haplotypes`, `variants`, `qc` and (when annotation ran)
