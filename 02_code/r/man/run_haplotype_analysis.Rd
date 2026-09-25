@@ -24,7 +24,11 @@ run_haplotype_analysis(
   use_samtools = FALSE,
   threads = 4L,
   keep_intermediates = TRUE,
-  ref_label = NULL
+  ref_label = NULL,
+  annotation = NULL,
+  list_transcripts = FALSE,
+  annotation_proteins = FALSE,
+  annotation_detail = FALSE
 )
 }
 \arguments{
@@ -70,9 +74,22 @@ Rsamtools. Rsamtools is recommended and is used by default.}
 \item{keep_intermediates}{Keep BAM and other intermediate files.}
 
 \item{ref_label}{Optional reference label used in outputs.}
+
+\item{annotation}{Optional annotation config path (JSON). When supplied, a
+functional annotation pass runs and writes `annotation.tsv`.}
+
+\item{list_transcripts}{When TRUE only the candidate transcript table is
+printed and no analysis is run.}
+
+\item{annotation_proteins}{Include reference/alternate protein sequences in
+`annotation.tsv`.}
+
+\item{annotation_detail}{Also write `variants_annotation.tsv` with the
+per-variant consequences.}
 }
 \value{
-A list with `haplotypes`, `variants` and `qc` elements.
+A list with `haplotypes`, `variants`, `qc` and (when annotation ran)
+`annotation` elements.
 }
 \description{
 Align reads to a target sequence, correct sequencing errors, reconstruct

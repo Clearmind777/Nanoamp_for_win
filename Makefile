@@ -52,6 +52,7 @@ gui-test:
 	python 02_code/PythonGUI/tests/test_headless.py
 	python 02_code/PythonGUI/tests/test_e2e.py
 	python 02_code/PythonGUI/tests/test_frozen.py
+	python 02_code/PythonGUI/tests/test_annotation_gui.py
 
 # --- release/ : the bundle that is handed to a user -------------------------
 # Rebuilds the payload pieces (R package tarball, GUI exe) into release/.

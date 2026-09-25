@@ -59,7 +59,25 @@ cluster_sequences <- function(seqs, identity_cutoff = 0.99, threads = 4L,
     ans <- tryCatch({
       x <- Biostrings::DNAStringSet(toupper(seqs))
       names(x) <- sprintf("r%06d", seq_len(n))
-      d <- DECIPHER::DistanceMatrix(x, processors = threads, verbose = FALSE)
+      # DECIPHER warns when the sequences differ in length ("using shorter
+      # length in each comparison"), which is the normal case for nanopore
+      # reads. Capture it instead of letting it surface as one R warning per
+      # Mode B run: it is reported once as a note and recorded in qc.tsv, and a
+      # batch of runs no longer ends with "There were 50 or more warnings".
+      distance_note <- NA_character_
+      d <- withCallingHandlers(
+        DECIPHER::DistanceMatrix(x, processors = threads, verbose = FALSE),
+        warning = function(w) {
+          # Collapse to one line: the message arrives wrapped in newlines, and
+          # this value is written into qc.tsv, where a raw newline would split
+          # the row and silently corrupt the file.
+          distance_note <<- gsub("\\s+", " ", trimws(conditionMessage(w)))
+          invokeRestart("muffleWarning")
+        }
+      )
+      if (!is.na(distance_note)) {
+        log_info("clustering: ", distance_note)
+      }
       dm <- as.matrix(d)
       exports <- getNamespaceExports("DECIPHER")
       if ("Clusterize" %in% exports) {
@@ -88,7 +106,8 @@ cluster_sequences <- function(seqs, identity_cutoff = 0.99, threads = 4L,
         clv <- clv[names(x)]
         method <- "DECIPHER::DistanceMatrix+hclust"
       }
-      list(cluster = unname(clv), distance = dm, method = method)
+      list(cluster = unname(clv), distance = dm, method = method,
+           note = distance_note)
     }, error = function(e) {
       log_warn("DECIPHER clustering failed; falling back to greedy clustering: ",
                conditionMessage(e))
@@ -174,7 +193,9 @@ run_mode_b <- function(reads_path, reference_path, outdir,
                        max_msa_seqs = 100L, consensus_method = "decipher",
                        aligner = c("minimap2", "r"), use_samtools = FALSE,
                        threads = 4L, keep_intermediates = TRUE,
-                       ref_label = NULL) {
+                       ref_label = NULL, annotation = NULL,
+                       list_transcripts = FALSE, annotation_proteins = FALSE,
+                       annotation_detail = FALSE) {
   aligner <- match.arg(aligner, c("minimap2", "r"))
   outdir <- ensure_dir(outdir)
   ref <- read_reference(reference_path)
@@ -272,6 +293,9 @@ run_mode_b <- function(reads_path, reference_path, outdir,
   qc <- list(
     mode = "B",
     aligner = aligner,
+    # Mode B always calls pairwiseAlignment() to annotate cluster consensus
+    # sequences, so record which package supplied it.
+    pairwise_provider = pa_provider_name(),
     reference_label = ref_label %||% ref$name,
     reference_length = ref$length,
     n_reads_total = n_total,
@@ -282,6 +306,10 @@ run_mode_b <- function(reads_path, reference_path, outdir,
     mean_coverage = round(sum(kept$ref_span) / ref$length, 4),
     identity_cutoff = identity_cutoff,
     clustering_method = cl$method,
+    # Set when DECIPHER reported something about the distance computation
+    # (e.g. that the reads differ in length). Kept so the caveat survives the
+    # run instead of living only in console output.
+    clustering_note = cl$note %||% NA_character_,
     consensus_method = consensus_method,
     decipher_version = if (requireNamespace("DECIPHER", quietly = TRUE)) {
       as.character(utils::packageVersion("DECIPHER"))
@@ -293,16 +321,26 @@ run_mode_b <- function(reads_path, reference_path, outdir,
     top1_proportion = round(clusters$proportion[1], 6),
     top1_is_reference = clusters$is_reference[1]
   )
+  ann <- annotation_pass(annotation, ref, clusters, NULL, outdir,
+                         list_only = list_transcripts,
+                         haplotype_id_col = "cluster_id",
+                         include_proteins = annotation_proteins,
+                         include_detail = annotation_detail)
+  # ann$qc is present whenever a config was supplied, including when annotation
+  # was requested but produced nothing (the skip reason must reach qc.tsv).
+  if (!is.null(ann$qc)) qc <- c(qc, ann$qc)
   write_tsv(build_qc_table(qc), file.path(outdir, "qc.tsv"))
   run_manifest(outdir, "B", list(
     top_n = top_n, identity_cutoff = identity_cutoff,
     min_cluster_reads = min_cluster_reads, min_identity = min_identity,
     min_ref_coverage = min_ref_coverage, max_msa_seqs = max_msa_seqs,
     consensus_method = consensus_method, aligner = aligner, threads = threads
-  ), ref, qc, extra = list(reads_md5 = safe_md5(reads_path)))
+  ), ref, qc, extra = c(list(reads_md5 = safe_md5(reads_path)),
+                        if (!is.null(ann$manifest)) list(annotation = ann$manifest)))
 
   if (!isTRUE(keep_intermediates) && !is.null(prep$bam)) {
     unlink(c(prep$bam, paste0(prep$bam, ".bai"), paste0(prep$bam, ".minimap2.log")))
   }
-  invisible(list(haplotypes = clusters, variants = var_rows, qc = qc))
+  invisible(list(haplotypes = clusters, variants = var_rows, qc = qc,
+                 annotation = ann$table))
 }

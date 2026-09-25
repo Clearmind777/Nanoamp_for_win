@@ -192,6 +192,28 @@ D:\nanoamp\
 | `qc.tsv` | 质量指标 |
 | `run_manifest.json` | 本次运行的参数、版本、输入文件校验值（可追溯） |
 
+### 功能注释（可选）
+
+勾选输入区的**「功能注释…」**即启用：程序会把每条单倍型的变异翻译成生物学后果
+（移码 / 提前终止 / 终止丢失 / 整码插入缺失 / 错义 / 同义，以及 UTR、内含子、剪接区），
+并在输出目录多写两个文件：
+
+| 文件 | 内容 |
+|---|---|
+| `annotation.tsv` | 每个「单倍型 × 转录本」一行，含中英双列后果、蛋白变化、转录本冲突标记 |
+| `variants_annotation.tsv` | 勾选「输出变异级明细」时生成：每个变异一行，含 CDS 坐标、密码子与氨基酸变化 |
+
+两条路线，界面里直接选：
+
+| 路线 | 是否需要联网 | 你要提供什么 |
+|---|---|---|
+| **离线 CDS（不联网）** | 不需要 | 在界面里填 CDS 的起止坐标、链与读码框（坐标以目的序列为准，1-based；长度必须是 3 的倍数） |
+| **在线 genome（需联网）** | 需要 | 什么都不用填：程序自行在 GRCh38 定位扩增子并从 Ensembl 取转录本结构 |
+
+判断注释覆盖了哪些转录本，请以 **`qc.tsv` 的 `n_transcripts_annotated` /
+`n_transcripts_skipped` / `annotation_skip_reason`** 为准（「注释结果」页会把它们显示在状态行），
+**不要只看 `annotation.tsv` 有几行**。注释被跳过时退出码仍是 0，因为序列分析本身成功了。
+
 ---
 
 ## 5. 三种交付版本的选择
@@ -428,7 +450,16 @@ python release/_installer/capture_uninstaller_populated.py tmp/test_results/shot
 1. **依赖 R**：图形界面 exe 只打包界面（10 MB），不含 R 运行时。
 2. **exe 冷启动约 1–3 秒**：单文件打包每次运行需解压到临时目录。
 3. **无批量界面**：CLI 的 `nanoamp batch` 尚未接进图形界面。
-4. **无 GTF / CDS 功能注释**：委托中点名的"移码/提前终止/missense"尚未实现。
+4. **功能注释的两条路线限制不同**：
+   - **离线 CDS 路线**（GUI 里的「离线 CDS（不联网）」）：不需要联网，但 CDS 长度必须是
+     3 的倍数、坐标必须由使用者按自己的扩增子给出；长度不对时**跳过该注释并记账**
+     （`qc.tsv` 的 `n_transcripts_skipped` / `annotation_skip_reason`），退出码仍为 0。
+   - **在线 genome 路线**（「在线 genome（需联网）」）：需要能访问 Ensembl REST；
+     扩增子不在内置 panel（当前仅 ZNF8）时会退化为逐染色体扫描，**可能非常慢**；
+     参考序列与 GRCh38 匹配不足（锚定覆盖率 < 0.9）时会**明确报错**而不是凭猜测给坐标。
+   - 注释结果依赖 Ensembl release（会记录在 `run_manifest.json` 的
+     `annotation.ensembl_release`）；`protein_change` 是 HGVS 风格但**未经 HGVS 认证**，
+     不应当作临床报告依据。
 5. **测试数据是普通文件**：`01_data/<dataset>/<sample>/` 里直接就是
    `reads.fastq` / `reference.self.fa` / `consensus.N.fa` / `variants.N.xlsx` /
    `sanger.N.ab1`，随仓库一起提交，**克隆后不需要任何准备步骤**。

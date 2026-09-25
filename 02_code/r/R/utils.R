@@ -136,6 +136,22 @@ check_external_tool <- function(tool) {
 }
 
 write_tsv <- function(df, path) {
+  # Defence in depth for a machine-read TSV: fwrite(quote = FALSE) writes a
+  # character value verbatim, so a field containing a tab or a newline splits
+  # the row and silently corrupts the file for every reader (this really
+  # happened upstream: a DECIPHER message captured into qc.tsv broke the file,
+  # and data.table::fread then "stopped early" without an error). Fields are
+  # collapsed to a single line; no output here relies on embedded newlines.
+  df <- data.table::as.data.table(df)
+  if (length(df) > 0L) {
+    df <- data.table::copy(df)
+    for (j in seq_along(df)) {
+      if (is.character(df[[j]])) {
+        # gsub() passes NA through unchanged, so missing values stay missing.
+        df[[j]] <- gsub("[\r\n\t]+", " ", df[[j]])
+      }
+    }
+  }
   data.table::fwrite(df, path, sep = "\t", quote = FALSE, na = "")
 }
 

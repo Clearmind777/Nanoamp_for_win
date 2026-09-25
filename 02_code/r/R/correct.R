@@ -120,7 +120,9 @@ run_mode_a <- function(reads_path, reference_path, outdir,
                        homopolymer = 4L, strand_bias = 0.90,
                        aligner = c("minimap2", "r"), use_samtools = FALSE,
                        threads = 4L, keep_intermediates = TRUE,
-                       ref_label = NULL) {
+                       ref_label = NULL, annotation = NULL,
+                       list_transcripts = FALSE, annotation_proteins = FALSE,
+                       annotation_detail = FALSE) {
   aligner <- match.arg(aligner, c("minimap2", "r"))
   outdir <- ensure_dir(outdir)
   ref <- read_reference(reference_path)
@@ -175,6 +177,8 @@ run_mode_a <- function(reads_path, reference_path, outdir,
   qc <- list(
     mode = "A",
     aligner = aligner,
+    # Which package supplied pairwiseAlignment(); only used by aligner = "r".
+    pairwise_provider = if (identical(aligner, "r")) pa_provider_name() else NA_character_,
     reference_label = ref_label %||% ref$name,
     reference_length = ref$length,
     n_reads_total = n_total,
@@ -190,16 +194,25 @@ run_mode_a <- function(reads_path, reference_path, outdir,
     top1_is_reference = hap$is_reference[1],
     exact_reference_proportion = round(hap[is_reference == TRUE, sum(proportion)], 6)
   )
+  ann <- annotation_pass(annotation, ref, hap, disc$variants, outdir,
+                         list_only = list_transcripts,
+                         include_proteins = annotation_proteins,
+                         include_detail = annotation_detail)
+  # ann$qc is present whenever a config was supplied, including when annotation
+  # was requested but produced nothing (the skip reason must reach qc.tsv).
+  if (!is.null(ann$qc)) qc <- c(qc, ann$qc)
   write_tsv(build_qc_table(qc), file.path(outdir, "qc.tsv"))
   run_manifest(outdir, "A", list(
     top_n = top_n, min_reads = min_reads, min_freq = min_freq,
     min_identity = min_identity, min_ref_coverage = min_ref_coverage,
     homopolymer = homopolymer, strand_bias = strand_bias,
     aligner = aligner, threads = threads
-  ), ref, qc, extra = list(reads_md5 = safe_md5(reads_path)))
+  ), ref, qc, extra = c(list(reads_md5 = safe_md5(reads_path)),
+                        if (!is.null(ann$manifest)) list(annotation = ann$manifest)))
 
   if (!isTRUE(keep_intermediates) && !is.null(prep$bam)) {
     unlink(c(prep$bam, paste0(prep$bam, ".bai"), paste0(prep$bam, ".minimap2.log")))
   }
-  invisible(list(haplotypes = hap, variants = variants_tbl, qc = qc))
+  invisible(list(haplotypes = hap, variants = variants_tbl, qc = qc,
+                 annotation = ann$table))
 }

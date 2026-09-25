@@ -33,7 +33,8 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.16.md      # tidy release/: payload at the root, packaging in _build/
     |-- work_report.17.md      # serious tone throughout: UI strings and every README
     |-- work_report.18.md      # drop the empty 04_builds/; rebuild the R package tarball
-    `-- work_report.19.md      # installer: retry file copies that Windows has locked
+    |-- work_report.19.md      # installer: retry file copies that Windows has locked
+    `-- work_report.20.md      # sync Linux's lead: core fixes, functional annotation, GUI
 ```
 
 The original request and the requested deliverables are documented in

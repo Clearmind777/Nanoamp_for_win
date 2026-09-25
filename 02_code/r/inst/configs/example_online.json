@@ -1,0 +1,8 @@
+{
+  "name": "example_genome_route",
+  "route": "genome",
+  "genetic_code": "Standard",
+  "transcript_id": null,
+  "transcript_all": false,
+  "notes": "Default route: the program locates the amplicon in GRCh38 itself and takes the transcript structure from Ensembl REST. No reference files are needed."
+}

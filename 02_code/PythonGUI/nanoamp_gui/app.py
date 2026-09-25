@@ -11,10 +11,12 @@ dependency to install and PyInstaller can freeze it into a single .exe.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import traceback
 import webbrowser
@@ -31,6 +33,18 @@ MODES = [
     ("B - 从头聚类", "B"),
     ("C - 精确匹配（诊断用）", "C"),
 ]
+
+# Functional annotation: where the configuration comes from. The offline route
+# is listed first because it needs no network at all -- the online route needs
+# the Ensembl REST API (and therefore a working proxy/firewall path).
+ANNOTATION_OFFLINE = "离线 CDS（不联网）"
+ANNOTATION_ONLINE = "在线 genome（需联网，用 Ensembl）"
+ANNOTATION_CUSTOM = "自定义 JSON…"
+ANNOTATION_SOURCES = [ANNOTATION_OFFLINE, ANNOTATION_ONLINE, ANNOTATION_CUSTOM]
+
+# Kept in step with the geometry set in main(); used for label wrapping.
+WINDOW_WIDTH = 1040
+WINDOW_MIN_HEIGHT = 600
 
 
 def resource_base() -> Path:
@@ -137,6 +151,18 @@ class NanoampApp(ttk.Frame):
         self.var_topn = tk.IntVar(value=20)
         self.var_status = tk.StringVar(value="就绪。")
 
+        # functional annotation state (see _build_annotation_group)
+        self.var_annot_on = tk.BooleanVar(value=False)
+        self.var_annot_source = tk.StringVar(value=ANNOTATION_SOURCES[0])
+        self.var_annot_custom = tk.StringVar()
+        self.var_cds_start = tk.StringVar(value="1")
+        self.var_cds_end = tk.StringVar(value="")
+        self.var_cds_strand = tk.StringVar(value="+")
+        self.var_cds_frame = tk.StringVar(value="0")
+        self.var_annot_proteins = tk.BooleanVar(value=False)
+        self.var_annot_detail = tk.BooleanVar(value=True)
+        self.var_annot_hint = tk.StringVar(value="")
+
         self._build_layout()
         self._detect_environment()
         self.after(100, self._drain_log_queue)
@@ -144,7 +170,7 @@ class NanoampApp(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_layout(self) -> None:
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.rowconfigure(3, weight=1)
 
         # -- title
         header = ttk.Frame(self)
@@ -192,17 +218,23 @@ class NanoampApp(ttk.Frame):
             side="left", padx=(6, 0)
         )
 
+        # -- functional annotation (optional, off by default)
+        self._build_annotation_group()
+
         # -- results
         nb = ttk.Notebook(self)
-        nb.grid(row=2, column=0, sticky="nsew", pady=8)
+        nb.grid(row=3, column=0, sticky="nsew", pady=8)
+        self.notebook = nb
         self._build_haplotype_tab(nb)
+        self._build_annotation_tab(nb)
+        self._build_variant_annotation_tab(nb)
         self._build_qc_tab(nb)
         self._build_files_tab(nb)
         self._build_log_tab(nb)
 
         # -- actions
         actions = ttk.Frame(self)
-        actions.grid(row=3, column=0, sticky="ew")
+        actions.grid(row=4, column=0, sticky="ew")
         actions.columnconfigure(5, weight=1)
 
         self.btn_run = ttk.Button(actions, text="开始分析", command=self._on_run)
@@ -222,8 +254,244 @@ class NanoampApp(ttk.Frame):
         self.progress.grid(row=0, column=4, padx=(12, 0))
 
         status = ttk.Label(self, textvariable=self.var_status, anchor="w", foreground="#333333")
-        status.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        status.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self.status_label = status
+
+    # ------------------------------------------------- functional annotation
+    def _build_annotation_group(self) -> None:
+        """Optional annotation group: config source, CDS coordinates, outputs.
+
+        The offline (cds) route is first because it needs no network: the user
+        gives the CDS interval on the amplicon reference and the program only
+        translates. The online (genome) route locates the amplicon in GRCh38
+        and fetches the transcript structure from Ensembl.
+        """
+        box = ttk.Frame(self, padding=(10, 4, 10, 0))
+        box.grid(row=2, column=0, sticky="ew")
+        box.columnconfigure(1, weight=1)
+        self._annotation_box = box
+        ttk.Label(box, text="功能注释", foreground="#333333").grid(
+            row=0, column=0, sticky="w")
+
+        self.lbl_annot_source = ttk.Label(box, text="配置来源")
+        self.lbl_annot_source.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        src = ttk.Combobox(box, state="readonly", width=32,
+                           values=ANNOTATION_SOURCES, textvariable=self.var_annot_source)
+        src.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(2, 0))
+        src.bind("<<ComboboxSelected>>", lambda _e: self._sync_annotation_state())
+        self.btn_annot_browse = ttk.Button(box, text="浏览…",
+                                           command=self._pick_annotation_config)
+        self.btn_annot_browse.grid(row=1, column=2, padx=(6, 0), pady=(2, 0))
+
+        cds = ttk.Frame(box)
+        cds.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self._annot_cds_row = cds
+        ttk.Label(cds, text="CDS 起").pack(side="left")
+        self.entry_cds_start = ttk.Entry(cds, width=7, textvariable=self.var_cds_start)
+        self.entry_cds_start.pack(side="left", padx=(4, 10))
+        ttk.Label(cds, text="止").pack(side="left")
+        self.entry_cds_end = ttk.Entry(cds, width=7, textvariable=self.var_cds_end)
+        self.entry_cds_end.pack(side="left", padx=(4, 10))
+        ttk.Label(cds, text="链").pack(side="left")
+        self.box_cds_strand = ttk.Combobox(cds, state="readonly", width=3, values=["+", "-"],
+                                           textvariable=self.var_cds_strand)
+        self.box_cds_strand.pack(side="left", padx=(4, 10))
+        ttk.Label(cds, text="读码框").pack(side="left")
+        self.box_cds_frame = ttk.Combobox(cds, state="readonly", width=3,
+                                          values=["0", "1", "2"],
+                                          textvariable=self.var_cds_frame)
+        self.box_cds_frame.pack(side="left", padx=(4, 0))
+
+        self.chk_annot_detail = ttk.Checkbutton(
+            box, text="输出变异级明细（variants_annotation.tsv）",
+            variable=self.var_annot_detail)
+        self.chk_annot_detail.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.chk_annot_proteins = ttk.Checkbutton(
+            box, text="输出蛋白序列", variable=self.var_annot_proteins)
+        self.chk_annot_proteins.grid(row=3, column=2, sticky="w", pady=(4, 0))
+        self.lbl_annot_hint = ttk.Label(box, textvariable=self.var_annot_hint,
+                                        foreground="#7a5c00",
+                                        wraplength=WINDOW_WIDTH - 90, justify="left")
+        self.lbl_annot_hint.grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        # The whole panel is hidden while annotation is off: the default window
+        # is 720 px tall and must keep the results area and buttons in view.
+        self._annot_hidden = [box]
+
+        for var in (self.var_cds_start, self.var_cds_end, self.var_cds_strand,
+                    self.var_cds_frame, self.var_annot_source, self.var_annot_on):
+            var.trace_add("write", lambda *_: self._sync_annotation_state())
+        self._sync_annotation_state()
+
+    def _annotation_widgets(self) -> list:
+        return [self.entry_cds_start, self.entry_cds_end, self.box_cds_strand,
+                self.box_cds_frame, self.btn_annot_browse]
+
+    def _sync_annotation_state(self) -> None:
+        """Show/hide the optional rows, enable/disable, keep the hint in sync."""
+        on = bool(self.var_annot_on.get())
+        source = self.var_annot_source.get()
+        offline = source == ANNOTATION_OFFLINE
+
+        for widget in self._annot_hidden:
+            if on:
+                widget.grid()
+            else:
+                widget.grid_remove()
+
+        cds_widgets = (self.entry_cds_start, self.entry_cds_end,
+                       self.box_cds_strand, self.box_cds_frame)
+        for w in self._annotation_widgets():
+            if not on:
+                state = "disabled"
+            elif w in cds_widgets and not offline:
+                state = "disabled"
+            else:
+                state = "normal"
+            if isinstance(w, ttk.Combobox):
+                state = "readonly" if state == "normal" else "disabled"
+            w.configure(state=state)
+
+        if not on:
+            self.var_annot_hint.set("")
+            return
+        if offline:
+            problem = self._cds_problem()
+            if problem:
+                self.var_annot_hint.set(f"离线 CDS 路线：{problem}")
+            else:
+                start = self._int_or_none(self.var_cds_start.get())
+                end = self._int_or_none(self.var_cds_end.get())
+                length = (end - start + 1) if (start and end) else None
+                self.var_annot_hint.set(
+                    f"离线 CDS 路线：不联网。CDS 长度 {length} bp"
+                    f"（{length // 3 if length else 0} 个密码子）。"
+                    "坐标以目的序列（扩增子参考）为准，1-based。")
+        elif source == ANNOTATION_ONLINE:
+            self.var_annot_hint.set(
+                "在线 genome 路线：需要联网（程序自行在 GRCh38 定位扩增子并从 "
+                "Ensembl 取转录本结构）。扩增子不在内置 panel 时会退化为逐染色体扫描，"
+                "可能非常慢；建议先用「列出转录本」确认，或改用离线 CDS 配置。")
+        else:
+            path = self.var_annot_custom.get().strip()
+            self.var_annot_hint.set(
+                f"自定义配置：{path}" if path else "自定义配置：请先选择一个 JSON 文件。")
+        self._grow_to_fit()
+        # The wrapped hint can change the required height a moment later, so a
+        # second pass is scheduled for when the event loop goes idle.
+        try:
+            self.after_idle(self._grow_to_fit)
+        except tk.TclError:
+            pass
+
+    def _grow_to_fit(self) -> None:
+        """Grow the window instead of squeezing the result tables.
+
+        Enabling the annotation panel adds rows; at the default 720 px the
+        notebook would be left only a few dozen pixels tall. The window is only
+        ever grown, never shrunk, and never beyond the screen. The frame's own
+        requested height is used (rather than the toplevel's) so the value is
+        correct in the same event-loop turn as the layout change.
+        """
+        try:
+            root = self.winfo_toplevel()
+            self.update_idletasks()
+            root.update_idletasks()
+            # Frame and toplevel can disagree while the layout settles; take the
+            # larger of the two so the tables are never squeezed.
+            need = max(self.winfo_reqheight(), root.winfo_reqheight()) + 10
+            if root.winfo_height() >= need:
+                return
+            screen_h = root.winfo_screenheight() - 80
+            width = max(root.winfo_width(), WINDOW_WIDTH)
+            root.geometry(f"{width}x{min(need, screen_h)}")
+            root.update_idletasks()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _int_or_none(text: str) -> int | None:
+        try:
+            return int(str(text).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _cds_problem(self) -> str:
+        """Return a human-readable problem with the CDS form, or ""."""
+        start = self._int_or_none(self.var_cds_start.get())
+        end = self._int_or_none(self.var_cds_end.get())
+        if start is None or start < 1:
+            return "起始坐标无效（应为 ≥1 的整数）。"
+        if end is None or end < start:
+            return "终止坐标无效（应 ≥ 起始坐标）。"
+        length = end - start + 1
+        if length % 3 != 0:
+            return (f"CDS 长度 {length} bp 不是 3 的倍数，注释会被跳过"
+                    f"（应删掉 {length % 3} bp 或调整读码框）。")
+        return ""
+
+    def _bundled_config(self, name: str) -> Path | None:
+        """Locate a bundled example config in a checkout or an installed tree."""
+        candidates = [
+            self.repo_root / "02_code" / "r" / "inst" / "configs" / name,
+            Path(self.repo_root) / "inst" / "configs" / name,
+        ]
+        try:
+            from .r_runner import _configured_paths  # type: ignore
+            cfg = _configured_paths()
+            rlib = cfg.get("rlib")
+            if rlib:
+                candidates.insert(0, Path(rlib) / "nanoamp" / "configs" / name)
+        except Exception:  # noqa: BLE001 - discovery is best effort
+            pass
+        for cand in candidates:
+            if cand.is_file():
+                return cand
+        return None
+
+    def _pick_annotation_config(self) -> None:
+        path = filedialog.askopenfilename(
+            title="选择功能注释配置 JSON",
+            filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
+        )
+        if path:
+            self.var_annot_custom.set(path)
+            self.var_annot_source.set(ANNOTATION_CUSTOM)
+            self._sync_annotation_state()
+
+    def _annotation_config_path(self) -> tuple[Path | None, str]:
+        """Resolve the config to pass to the CLI; returns (path, error)."""
+        if not self.var_annot_on.get():
+            return None, ""
+        source = self.var_annot_source.get()
+        if source == ANNOTATION_OFFLINE:
+            problem = self._cds_problem()
+            if problem:
+                return None, problem
+            start = self._int_or_none(self.var_cds_start.get())
+            end = self._int_or_none(self.var_cds_end.get())
+            cfg = {
+                "name": "gui_offline_cds",
+                "route": "cds",
+                "cds": {"start": start, "end": end,
+                        "strand": self.var_cds_strand.get(),
+                        "frame": int(self.var_cds_frame.get()),
+                        "boundaries": "inclusive"},
+                "genetic_code": "Standard",
+                "notes": "written by nanoamp GUI",
+            }
+            tmp = Path(tempfile.gettempdir()) / f"nanoamp_gui_cds_{os.getpid()}.json"
+            tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            return tmp, ""
+        if source == ANNOTATION_ONLINE:
+            bundled = self._bundled_config("example_online.json")
+            if bundled is None:
+                return None, ("找不到随包的在线示例配置 example_online.json。\n"
+                              "请改用「自定义 JSON…」指定一个 route=genome 的配置。")
+            return bundled, ""
+        path = Path(self.var_annot_custom.get().strip())
+        if not path.is_file():
+            return None, f"自定义配置不存在：{path}"
+        return path, ""
 
     def _build_haplotype_tab(self, nb: ttk.Notebook) -> None:
         frame = ttk.Frame(nb, padding=4)
@@ -298,6 +566,72 @@ class NanoampApp(ttk.Frame):
         sb.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=sb.set, state="disabled")
 
+    def _build_annotation_tab(self, nb: ttk.Notebook) -> None:
+        """Per-haplotype x per-transcript consequences (annotation.tsv)."""
+        frame = ttk.Frame(nb, padding=4)
+        nb.add(frame, text="注释结果")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        self.annot_status = tk.StringVar(value="未运行功能注释。")
+        ttk.Label(frame, textvariable=self.annot_status, foreground="#7a5c00",
+                  wraplength=WINDOW_WIDTH - 90, justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w")
+
+        cols = ("haplotype_id", "transcript_id", "consequence_zh",
+                "consequence_any_transcript_zh", "transcript_conflict",
+                "protein_change", "variants")
+        heads = {
+            "haplotype_id": "编号", "transcript_id": "转录本",
+            "consequence_zh": "后果", "consequence_any_transcript_zh": "最严重后果",
+            "transcript_conflict": "转录本冲突", "protein_change": "蛋白变化",
+            "variants": "变异",
+        }
+        widths = {"haplotype_id": 65, "transcript_id": 145, "consequence_zh": 85,
+                  "consequence_any_transcript_zh": 95, "transcript_conflict": 85,
+                  "protein_change": 120, "variants": 185}
+        self.annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=8)
+        for c in cols:
+            self.annot_tree.heading(c, text=heads[c])
+            self.annot_tree.column(c, width=widths[c],
+                                   anchor="w" if c in ("variants", "transcript_id") else "center")
+        self.annot_tree.grid(row=1, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(frame, orient="vertical", command=self.annot_tree.yview)
+        sb.grid(row=1, column=1, sticky="ns")
+        self.annot_tree.configure(yscrollcommand=sb.set)
+        # Selecting a haplotype here highlights the same row in the other tabs.
+        self.annot_tree.bind("<<TreeviewSelect>>", self._on_select_annotation)
+
+    def _build_variant_annotation_tab(self, nb: ttk.Notebook) -> None:
+        """Per-variant consequences (variants_annotation.tsv)."""
+        frame = ttk.Frame(nb, padding=4)
+        nb.add(frame, text="变异注释")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        self.var_annot_status = tk.StringVar(
+            value="需要勾选「输出变异级明细」并在分析完成后查看。")
+        ttk.Label(frame, textvariable=self.var_annot_status, foreground="#666666",
+                  wraplength=WINDOW_WIDTH - 90, justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w")
+
+        cols = ("haplotype_id", "type", "genome_pos", "cds_pos", "ref", "alt",
+                "codon_ref", "codon_alt", "aa_ref", "aa_alt", "consequence_zh")
+        heads = {
+            "haplotype_id": "编号", "type": "类型", "genome_pos": "参考坐标",
+            "cds_pos": "CDS 坐标", "ref": "参考碱基", "alt": "变异碱基",
+            "codon_ref": "原密码子", "codon_alt": "新密码子",
+            "aa_ref": "原氨基酸", "aa_alt": "新氨基酸", "consequence_zh": "后果",
+        }
+        self.var_annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=8)
+        for c in cols:
+            self.var_annot_tree.heading(c, text=heads[c])
+            self.var_annot_tree.column(c, width=82, anchor="center")
+        self.var_annot_tree.grid(row=1, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(frame, orient="vertical", command=self.var_annot_tree.yview)
+        sb.grid(row=1, column=1, sticky="ns")
+        self.var_annot_tree.configure(yscrollcommand=sb.set)
+
     # -------------------------------------------------------- environment
     def _detect_environment(self) -> None:
         try:
@@ -361,14 +695,33 @@ class NanoampApp(ttk.Frame):
             messagebox.showerror("R 不可用", "未找到 Rscript。请先运行环境自检。")
             return
 
+        annot_cfg, annot_problem = self._annotation_config_path()
+        if annot_problem:
+            messagebox.showwarning("注释配置不完整", annot_problem)
+            return
+        mode = self.var_mode.get()
+        if annot_cfg is not None and mode == "C":
+            messagebox.showinfo(
+                "模式 C 不执行注释",
+                "模式 C 只做原始精确匹配统计，不运行功能注释。\n"
+                "注释参数已被忽略；如需注释请改用模式 A 或 B。",
+            )
+            annot_cfg = None
+
         argv = [
             "call",
             "--reads", reads,
             "--reference", reference,
             "--outdir", outdir,
-            "--mode", self.var_mode.get(),
+            "--mode", mode,
             "--top-n", str(self.var_topn.get()),
         ]
+        if annot_cfg is not None:
+            argv += ["--annotate-config", str(annot_cfg)]
+            if self.var_annot_detail.get():
+                argv.append("--annotation-detail")
+            if self.var_annot_proteins.get():
+                argv.append("--annotation-proteins")
         self._clear_results()
         self._cancel_requested = False
         self._set_running(True)
@@ -533,6 +886,11 @@ class NanoampApp(ttk.Frame):
             self.tree.delete(item)
         for item in self.files_tree.get_children():
             self.files_tree.delete(item)
+        for tree in (self.annot_tree, self.var_annot_tree):
+            for item in tree.get_children():
+                tree.delete(item)
+        self.annot_status.set("分析进行中…")
+        self.var_annot_status.set("分析进行中…")
         self._set_text(self.qc_text, "")
         self._set_text(self.seq_box, "")
         self.fasta_cache.clear()
@@ -553,8 +911,106 @@ class NanoampApp(ttk.Frame):
 
     def _load_results(self, outdir: Path) -> None:
         self._load_haplotypes(outdir / "haplotypes.tsv")
+        self._load_annotation(outdir)
         self._load_qc(outdir / "qc.tsv")
         self._load_files(outdir)
+
+    def _load_annotation(self, outdir: Path) -> None:
+        """Fill the annotation tabs and the three-state annotation status.
+
+        The status deliberately reports what the run *covered* (how many
+        transcripts were annotated or skipped), not how many rows
+        annotation.tsv happens to have: a run that annotated one transcript of
+        eight must not look like a complete success.
+        """
+        ann_path = outdir / "annotation.tsv"
+        detail_path = outdir / "variants_annotation.tsv"
+        for tree in (self.annot_tree, self.var_annot_tree):
+            for item in tree.get_children():
+                tree.delete(item)
+
+        qc = {}
+        qc_path = outdir / "qc.tsv"
+        if qc_path.is_file():
+            try:
+                _f, rows = self._read_tsv(qc_path)
+                qc = {r.get("metric", ""): r.get("value", "") for r in rows}
+            except OSError:
+                qc = {}
+
+        requested = qc.get("annotation_enabled", "").upper() == "TRUE"
+        available = qc.get("annotation_available", "").upper() == "TRUE"
+        if not requested and not ann_path.is_file():
+            self.annot_status.set("未运行功能注释。")
+            self.var_annot_status.set("需要勾选「输出变异级明细」并在分析完成后查看。")
+            return
+
+        if not available and requested:
+            reason = qc.get("annotation_skip_reason", "未说明原因")
+            self.annot_status.set(f"注释不可用：{reason}")
+            self._append_log(f"[GUI] 注释不可用：{reason}")
+            self.var_annot_status.set("注释不可用，因此没有变异级明细。")
+            return
+
+        rows = []
+        if ann_path.is_file():
+            _f, rows = self._read_tsv(ann_path)
+            for r in rows:
+                self.annot_tree.insert(
+                    "", "end",
+                    iid=f"{r.get('haplotype_id','')}|{r.get('transcript_id','')}",
+                    values=(r.get("haplotype_id", ""), r.get("transcript_id", ""),
+                            r.get("consequence_zh", ""),
+                            r.get("consequence_any_transcript_zh", ""),
+                            {"TRUE": "是", "FALSE": "否"}.get(
+                                r.get("transcript_conflict", "").upper(),
+                                r.get("transcript_conflict", "")),
+                            r.get("protein_change", ""), r.get("variants", "")),
+                )
+        n_ann = qc.get("n_transcripts_annotated", "")
+        n_skip = qc.get("n_transcripts_skipped", "")
+        n_hap = qc.get("n_haplotypes_annotated", "")
+        source = qc.get("annotation_source", "")
+        if n_skip not in ("", "0"):
+            reason = qc.get("annotation_skip_reason", "")
+            self.annot_status.set(
+                f"部分完成：已注释 {n_ann} 个转录本、{n_hap} 个单倍型；"
+                f"跳过 {n_skip} 个转录本。" + (f" 原因：{reason}" if reason else ""))
+        else:
+            self.annot_status.set(
+                f"已注释 {n_ann} 个转录本、{n_hap} 个单倍型（来源：{source}）。"
+                f"共 {len(rows)} 行后果。")
+        self._append_log("[GUI] " + self.annot_status.get())
+
+        if detail_path.is_file():
+            _f, drows = self._read_tsv(detail_path)
+            for r in drows:
+                self.var_annot_tree.insert(
+                    "", "end",
+                    values=(r.get("haplotype_id", ""), r.get("type", ""),
+                            r.get("genome_pos", ""), r.get("cds_pos", ""),
+                            r.get("ref", ""), r.get("alt", ""),
+                            r.get("codon_ref", ""), r.get("codon_alt", ""),
+                            r.get("aa_ref", ""), r.get("aa_alt", ""),
+                            r.get("consequence_zh", "")),
+                )
+            self.var_annot_status.set(f"{len(drows)} 条变异级后果。")
+        elif self.var_annot_detail.get():
+            self.var_annot_status.set(
+                "没有 variants_annotation.tsv：可能是本次没有落入 CDS 的变异，"
+                "或注释被跳过（见「注释结果」页）。")
+        else:
+            self.var_annot_status.set("未请求变异级明细（勾选后重跑即可生成）。")
+
+    def _on_select_annotation(self, _event) -> None:
+        """Selecting an annotation row also selects the haplotype elsewhere."""
+        sel = self.annot_tree.selection()
+        if not sel:
+            return
+        hid = str(sel[0]).split("|", 1)[0]
+        if hid in self.tree.get_children():
+            self.tree.selection_set(hid)
+            self.tree.see(hid)
 
     def _load_haplotypes(self, path: Path) -> None:
         if not path.is_file():

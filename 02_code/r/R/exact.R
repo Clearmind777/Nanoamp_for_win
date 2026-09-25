@@ -4,10 +4,15 @@
 
 run_mode_c <- function(reads_path, reference_path, outdir,
                        top_n = 20L, keep_intermediates = TRUE,
-                       ref_label = NULL) {
+                       ref_label = NULL, annotation = NULL,
+                       list_transcripts = FALSE, annotation_proteins = FALSE,
+                       annotation_detail = FALSE) {
   outdir <- ensure_dir(outdir)
   ref <- read_reference(reference_path)
   fq <- read_fastq(reads_path)
+  if (!is.null(annotation)) {
+    log_warn("Mode C counts raw reads only; functional annotation is not run")
+  }
   log_info("Mode C: ", basename(reads_path), " -> ", ref$name, " (", nrow(fq), " reads)")
   if (nrow(fq) == 0) stop("Mode C: FASTQ is empty", call. = FALSE)
 
