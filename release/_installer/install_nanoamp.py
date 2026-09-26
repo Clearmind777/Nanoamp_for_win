@@ -533,6 +533,16 @@ class Context:
         return exes[-1] if exes else None
 
     @property
+    def uninstaller_exe(self) -> Path | None:
+        """The uninstaller shipped next to install.exe.
+
+        install.exe copies it into the install directory, so removing nanoamp
+        does not depend on keeping the unpacked setup folder around.
+        """
+        candidate = self.root / "uninstall.exe"
+        return candidate if candidate.is_file() else None
+
+    @property
     def minimap2_exe(self) -> Path | None:
         """Where the aligner comes from.
 
@@ -788,7 +798,7 @@ class Installer:
             # from .libPaths(), which would make later steps look broken.
             self._prepare_dirs()
 
-            total = 6
+            total = 7
             self.step(0, total, "检查并安装 R 运行环境…")
             if not self._ensure_r():
                 return self._stopped() and self._cancelled_flow()
@@ -813,11 +823,13 @@ class Installer:
             self.step(4, total, "创建桌面快捷方式…")
             ok_gui = self._configure_gui()
 
-            self.step(5, total, "自检…")
-            ok_check = self._self_check()
+            self.step(5, total, "放入卸载程序…")
+            ok_uninstall = self._place_uninstaller()
 
+            self.step(6, total, "自检…")
+            ok_check = self._self_check()
             self._write_config()
-            self.events.put(("done", ok_cli and ok_gui and ok_check))
+            self.events.put(("done", ok_cli and ok_gui and ok_uninstall and ok_check))
             return True
         except Exception as exc:  # noqa: BLE001 - report anything to the user
             import traceback
@@ -1335,6 +1347,34 @@ quit(save = "no", status = status, runLast = FALSE)
             self.say("已在桌面创建快捷方式")
         else:
             self.say(f"桌面快捷方式创建失败，可直接运行 {target}")
+        return True
+
+    def _place_uninstaller(self) -> bool:
+        """Copy uninstall.exe into the install root.
+
+        Uninstalling used to require keeping the unpacked setup folder: the only
+        uninstall.exe was the one next to install.exe. A copy inside the install
+        directory means the folder itself can be thrown away right after
+        installing, and the *install directory* (the thing a user looks in) can
+        remove the installation again.
+
+        The copy is not fatal to the install if it is missing: the one in the
+        setup folder still works.
+        """
+        exe = self.ctx.uninstaller_exe
+        if exe is None:
+            self.say("警告：安装包里没有 uninstall.exe，安装目录下不会有卸载程序"
+                     "（仍可使用安装包里的那一个）。")
+            return True
+        target = self.ctx.install_root / "uninstall.exe"
+        try:
+            copy_with_retry(exe, target, self.say)
+        except OSError as exc:
+            self.say(f"复制卸载程序失败：{exc}")
+            self.say("安装已完成，但卸载请使用安装包里的 uninstall.exe。")
+            return False
+        self.say(f"已放置卸载程序 -> {target}")
+        self.say("（卸载时双击它即可；它删完安装目录最后会把自己也删掉）")
         return True
 
     def _self_check(self) -> bool:

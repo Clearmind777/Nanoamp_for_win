@@ -46,6 +46,11 @@ conda 也不使用 WSL。**
 >    ⑤**每个结果页都有水平滚动条**；⑥「输出文件」页的大小按 **KB / MB / GB** 显示；
 >    ⑦「QC 指标」页新增**「指标说明」**勾选框，勾上后在右侧列出每个指标的含义
 >    （不需要先跑分析）。
+> 8. **卸载不再依赖安装包**：安装器会把 `uninstall.exe` 复制到**安装目录**里
+>    （`<安装目录>\uninstall.exe`），所以装完就可以把解压出来的安装包删掉，卸载双击
+>    安装目录里那一个即可。它自己就住在要删除的目录里，会先删掉其余内容，再在窗口
+>    关闭后自动删除自身与空目录（Windows 不允许删除正在运行的程序）。安装包里那份
+>    同样可用。
 
 ---
 
@@ -139,7 +144,7 @@ GUI 勾选「功能注释…」，命令行加 `--annotate-config <config.json>`
 
 ```text
 nanoamp-0.1.5-windows-setup.zip
-  sha256  6e931188a6388c0196278cd647a1b9546100936d5eff574894ef7cc7632ee18f
+  sha256  e2826ff97f6eaf0e40d4c3175e27c5bb9c8caef1ff77ab55de304ad78bfdbd18
 
 nanoamp-0.1.0-windows-offline-deps.zip
   sha256  2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40

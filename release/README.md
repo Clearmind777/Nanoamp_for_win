@@ -10,7 +10,7 @@
 ```text
 release/
 |-- install.exe           ← 使用者双击这个（约 12 MB）
-|-- uninstall.exe         ← 卸载器
+|-- uninstall.exe         ← 卸载器（安装时会被复制进安装目录，见「卸载」）
 |-- README.md             ← 使用者看到的说明
 |-- 01_R-package/         R 包版：需要编写 R 代码的用户
 |-- 02_CLI/               命令行版：需要批量处理样本的用户
@@ -37,6 +37,9 @@ nanoamp-windows/            ← 解压到同一个地方（两个 zip 会自动�
 |-- bin/minimap2.exe         ← 比对程序（两个资产里是同一个文件）
 `-- _offline/                ← 来自 nanoamp-0.1.0-windows-offline-deps.zip（可选）
 ```
+
+安装完成后，安装目录里除了 `app/ bin/ config/ configs/ R/` 之外还会多一个
+`uninstall.exe`（从上面这个包里复制的），所以**装完就可以把解压出来的安装包删掉**。
 
 ### 仅解压 setup 包时的联网安装
 
@@ -123,10 +126,11 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
           修掉三处 GUI 问题：关掉注释后不再显示上一次的 annotation.tsv、
           点「开始分析」清空结果页且可用「查看上次结果」回看、
           不勾选 PATH 时也能找到 minimap2（另：CDS「止」按目的序列长度预填）
-          又一轮 GUI 改进：修掉"请先在「注释结果」里选一行"的误报（点了一行后
-          按钮/双击会弹出模态提示框、窗口看起来像卡死）、新增分析名称、
-          变异注释页说明缺哪一步、单倍型页可拖动分隔线、每页水平滚动条、
+          又一轮 GUI 改进：修掉"请先在「注释结果」里选一行"的误报（表现为窗口像卡死一样）、
+          新增分析名称、变异注释页说明缺哪一步、单倍型页可拖动分隔线、每页水平滚动条、
           输出文件按 KB/MB/GB 显示、QC 指标说明
+          卸载器放入安装目录：install.exe 同时把 uninstall.exe 复制到 <安装目录>，
+          装完可删掉安装包；从安装目录运行时它会删掉其余内容后再自删
           离线依赖包未变（sha256 2db72289…，重建结果逐字节一致）
           sha256 见 release/_build/SHA256SUMS.txt（这个文件不进资产，所以资产自身的
           校验值写在那里，不会因为改本文件而失效）
@@ -242,7 +246,8 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
 | 4. 注册 `nanoamp` 命令 | 生成 `nanoamp.cmd` 并把 `<安装目录>\bin` 加入用户 PATH（可取消） |
 | 5. 安装比对程序 | 把 `bin/minimap2.exe`（或 `_offline/minimap2.exe`）复制到 `<安装目录>\bin\minimap2.exe` |
 | 6. 创建桌面快捷方式 | 指向安装好的图形界面（可取消） |
-| 7. 自检 | 检查包、依赖、minimap2 是否就绪 |
+| 7. 放入卸载程序 | 把 `uninstall.exe` 复制到 `<安装目录>\uninstall.exe`，这样卸载不必依赖解压出来的安装包 |
+| 8. 自检 | 检查包、依赖、minimap2 是否就绪 |
 
 安装位置默认是 `%LOCALAPPDATA%\nanoamp`，**可以在窗口里修改**。
 
@@ -255,6 +260,7 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
   bin\nanoamp.cmd                命令行启动器
   bin\minimap2.exe               比对程序
   config\                        生成的 R 驱动脚本与日志
+  uninstall.exe                  卸载程序（从安装包复制过来；卸载时删除自身）
   config.ini                     安装记录
 %USERPROFILE%\Documents\.Renviron                 R_LIBS_USER 指向上面那个库
 %USERPROFILE%\Desktop\nanoamp 分析工具.lnk       桌面快捷方式
@@ -264,6 +270,9 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
 卸载：双击 `uninstall.exe`（见下文），它会自动处理上述位置。
 
 ## 卸载
+
+安装完成后，**安装目录里就有一个 `uninstall.exe`**（安装器把安装包里的那份复制过去），
+双击它就卸载 —— 不需要保留解压出来的安装包。安装包里那个同样可用，两个是一样的程序。
 
 双击 **`uninstall.exe`** 后，它会：
 
@@ -276,10 +285,15 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
 
 > 只有随程序一起安装的 R（位于安装目录内的 `R\R-runtime`）才会作为可选项出现，
 > 默认不勾选。
+>
+> 从安装目录里运行它时，它自己就住在要删除的目录里。Windows 不允许删除正在运行的程序，
+> 所以它会先删掉**其余全部内容**，再安排一个后台小脚本在本窗口关闭后删掉
+> `uninstall.exe` 本身和空目录（约 1–2 秒）。安装包里的那份不在安装目录内，删除是即时的。
 
 安装到非默认位置也不影响卸载：安装器会把位置记录在
-`%LOCALAPPDATA%\nanoamp.path`；即使这个记录丢失，卸载器还会到用户 PATH
-指向的目录里按特征文件查找。
+`%LOCALAPPDATA%\nanoamp.path`；**安装目录里那份 `uninstall.exe` 还优先读它旁边的
+`config.ini`**，所以即使指针记录丢失，它依然知道该删哪个目录；安装包里那份则会到用户
+PATH 指向的目录里按特征文件查找。
 
 ## 两个 exe 的命令行用法
 

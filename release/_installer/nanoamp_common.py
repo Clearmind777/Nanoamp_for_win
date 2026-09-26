@@ -13,6 +13,7 @@ back from there.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 PRODUCT = "nanoamp"
@@ -27,17 +28,53 @@ def default_install_home() -> Path:
     return Path(local) / PRODUCT
 
 
+def running_dir() -> Path | None:
+    """The directory the running installer/uninstaller lives in.
+
+    Frozen by PyInstaller it is the .exe's own directory; from source it is the
+    directory of this module's package. ``None`` when neither can be determined.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parent
+    except (OSError, ValueError):
+        return None
+
+
 def config_candidates() -> list[Path]:
-    """config.ini locations to look in, most authoritative first."""
-    out: list[Path] = [default_install_home() / CONFIG_FILE]
+    """config.ini locations to look in, most authoritative first.
+
+    A ``config.ini`` next to the running program comes first: install.exe now
+    leaves a copy of ``uninstall.exe`` inside the install directory, and that
+    copy must describe *that* installation even if the location pointer or the
+    default location has since been changed or removed. After it come the
+    pointer file written by the last install and the default location, so an
+    install.exe running from its unpacked folder still finds the installation
+    it created.
+    """
+    out: list[Path] = []
+    here = running_dir()
+    if here is not None:
+        out.append(here / CONFIG_FILE)
 
     # The install location may have been changed, in which case config.ini is
     # wherever the user put it. Known locations from previous runs are recorded
-    # in the per-user pointer file below.
+    # in the per-user pointer file.
     pointer = registry_of_installs()
-    if pointer and pointer not in out:
-        out.insert(0, pointer)
-    return out
+    if pointer:
+        out.append(pointer)
+
+    out.append(default_install_home() / CONFIG_FILE)
+
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in out:
+        key = os.path.normcase(str(path))
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
 def registry_of_installs() -> Path | None:

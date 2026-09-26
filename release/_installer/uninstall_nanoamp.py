@@ -23,6 +23,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import winreg
@@ -45,6 +46,7 @@ from nanoamp_common import (
 
 APP_TITLE = "nanoamp 卸载程序"
 CREATE_NO_WINDOW = 0x08000000
+DETACHED_PROCESS = 0x00000008
 
 # Fixed width for the window; fit_to_content() only varies the height.
 WINDOW_WIDTH = 760
@@ -289,13 +291,30 @@ class Uninstaller:
             self.say("（跳过安装目录）")
             return True
         root = self.plan.install_root
+        me = _running_exe()
+        self_delete = me if _inside(me, root) else None
         self.freed += _size_of(root)
+        if self_delete is not None:
+            # It is removed a moment later by the detached helper, so it is not
+            # freed by this process; do not claim it was.
+            try:
+                self.freed -= self_delete.stat().st_size
+            except OSError:
+                pass
         self.say(f"正在删除 {root} …")
 
         # The GUI is very likely still running when someone uninstalls (it is
         # what they just closed, or they forgot). Its nanoamp.exe would be
         # locked, so stop our own processes first.
         self._stop_running_background_processes()
+
+        # install.exe puts a copy of this program inside the install directory,
+        # so the most likely case is that the file being deleted right now is
+        # this very process. Windows will not allow that; everything else is
+        # removed here and the locked file is handed to a detached helper.
+        if self_delete is not None:
+            self.say(f"本程序就在该目录里（{self_delete.name}），最后一个文件会在本窗口"
+                     "关闭后自动删除。")
 
         # A file can stay locked briefly while Windows releases the handle.
         # Retry with a growing delay rather than giving up on the first error.
@@ -304,14 +323,29 @@ class Uninstaller:
             if delay:
                 time.sleep(delay)
             try:
-                _remove_tree(root)
-                self.say(f"安装目录已删除（第 {attempt} 次尝试）")
-                return True
+                if self_delete is not None:
+                    _remove_tree_skipping(root, {self_delete})
+                else:
+                    _remove_tree(root)
             except OSError as exc:
                 last_error = exc
                 blocked = _blocking_files(root)
                 detail = ("，被占用：" + ", ".join(blocked[:3])) if blocked else ""
                 self.say(f"  第 {attempt}/{len(REMOVE_RETRY_DELAYS)} 次删除未完成：{exc}{detail}")
+                continue
+
+            if self_delete is None:
+                self.say(f"安装目录已删除（第 {attempt} 次尝试）")
+                return True
+
+            scheduled = _schedule_final_cleanup(self_delete, root)
+            self.say(f"安装目录内容已删除（第 {attempt} 次尝试）")
+            if scheduled:
+                self.say("已安排在本窗口关闭后删除最后的 uninstall.exe 与空目录。")
+            else:
+                self.say(f"未能安排自动删除，请手动删除 {self_delete}（以及空目录 {root}）。")
+            return True
+
         self.say(f"删除失败：{last_error}")
         self.say("提示：请关闭正在运行的 nanoamp 窗口后重新运行本程序，或手动删除该目录。")
         return False
@@ -454,6 +488,128 @@ def _remove_tree(root: Path) -> None:
     shutil.rmtree(root, onerror=_on_error)
     if root.exists():
         raise failed[0] if failed else OSError(f"目录未能完全删除：{root}")
+
+
+def _running_exe() -> Path | None:
+    """The uninstall.exe that is executing right now, if it is a frozen one."""
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        return Path(sys.executable).resolve()
+    except (OSError, ValueError):
+        return None
+
+
+def _norm(path: Path | str) -> str:
+    """A comparison form for a path: resolved, case-folded, no trailing separator.
+
+    Windows hands out the same directory in several spellings (8.3 short names,
+    different case, mixed separators), so comparing raw ``Path`` objects is not
+    reliable - and getting it wrong here would mean deleting the running exe.
+    """
+    try:
+        text = str(Path(path).resolve())
+    except (OSError, ValueError):
+        text = str(path)
+    return os.path.normcase(text).rstrip("\\/")
+
+
+def _same_path(a: Path | str, b: Path | str) -> bool:
+    return _norm(a) == _norm(b)
+
+
+def _inside(path: Path | None, root: Path) -> bool:
+    """True when `path` sits inside `root` (never treats root itself as inside)."""
+    if path is None:
+        return False
+    root_norm = _norm(root)
+    path_norm = _norm(path)
+    return path_norm.startswith(root_norm + "\\")
+
+
+def _remove_tree_skipping(root: Path, skip: set[Path]) -> None:
+    """Delete everything under `root` except `skip`, then the empty directories.
+
+    The uninstaller now ships inside the install directory, so the file that is
+    running cannot be deleted - Windows keeps it locked. It is not even
+    attempted: skipping it outright makes the result independent of whether some
+    other process happens to hold it open. The locked file is removed by a
+    detached helper once this process exits (see _schedule_final_cleanup).
+
+    Raises OSError when anything else is still there afterwards.
+    """
+
+    def _skip(p: Path) -> bool:
+        return any(_same_path(p, kept) for kept in skip)
+
+    failed: list[BaseException] = []
+    for dirpath, _dirnames, filenames in os.walk(root, topdown=False):
+        for name in filenames:
+            candidate = Path(dirpath) / name
+            if _skip(candidate):
+                continue
+            try:
+                os.unlink(candidate)
+            except OSError:
+                # Read-only files (and files that were locked a moment ago)
+                # usually go on the second attempt.
+                try:
+                    os.chmod(candidate, stat.S_IWRITE)
+                    os.unlink(candidate)
+                except OSError as exc:
+                    if not failed:
+                        failed.append(exc)
+        try:
+            os.rmdir(dirpath)          # fails while something is left in it
+        except OSError:
+            pass
+
+    leftovers = [p for p in root.rglob("*") if p.is_file() and not _skip(p)]
+    if leftovers:
+        raise failed[0] if failed else OSError(
+            f"目录未能完全删除：{leftovers[0]}")
+
+
+def _schedule_final_cleanup(exe: Path, root: Path) -> bool:
+    """Delete `exe` and the (now empty) `root` after this process exits.
+
+    Windows refuses to delete a running executable, so the last step is handed
+    to a detached cmd.exe: it waits until this process is gone and then removes
+    the file and the directory. The paths are passed as arguments, so the script
+    itself is pure ASCII and no path (spaces, ampersands, Chinese characters)
+    has to survive being written into a batch file. The helper removes itself
+    too, so nothing is left in %TEMP%.
+    """
+    script = Path(tempfile.gettempdir()) / f"nanoamp_finish_uninstall_{os.getpid()}.cmd"
+    body = (
+        "@echo off\r\n"
+        "rem %1 = uninstall.exe, %2 = install directory.\r\n"
+        "rem Windows keeps a running exe locked, so retry the delete until it\r\n"
+        "rem succeeds (it does as soon as this process has exited).\r\n"
+        "for /l %%i in (1,1,120) do (\r\n"
+        "  del /f /q %1 >nul 2>&1\r\n"
+        "  if not exist %1 goto :gone\r\n"
+        "  ping -n 2 127.0.0.1 >nul\r\n"
+        ")\r\n"
+        ":gone\r\n"
+        "rmdir %2 >nul 2>&1\r\n"
+        'del /f /q "%~f0" >nul 2>&1\r\n'
+    )
+    try:
+        script.write_text(body, encoding="ascii")
+    except OSError as exc:
+        print(f"无法写入延迟删除脚本：{exc}")
+        return False
+    try:
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(script), str(exe), str(root)],
+            creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+            close_fds=True,
+        )
+    except OSError as exc:
+        print(f"无法启动延迟删除脚本：{exc}")
+        return False
+    return True
 
 
 def _on_rm_error(func, path, exc_info) -> None:

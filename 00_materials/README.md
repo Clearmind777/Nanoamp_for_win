@@ -49,9 +49,11 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |                          #   CDS end default
     |-- work_report.26.md      # .gitignore check, rebuilt release assets, and the
     |                          #   installed-tree end-to-end verification
-    `-- work_report.27.md      # seven GUI improvements (analysis name, resizable
-                               #   panes, scrollbars, sizes, QC glossary, hints,
-                               #   protein view / freeze fix)
+    |-- work_report.27.md      # seven GUI improvements (analysis name, resizable
+    |                          #   panes, scrollbars, sizes, QC glossary, hints,
+    |                          #   protein view / freeze fix)
+    `-- work_report.28.md      # installer places a self-deleting uninstall.exe in
+                               #   the install directory
 ```
 
 The original request and the requested deliverables are documented in
