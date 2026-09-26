@@ -40,8 +40,10 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |                          #   functional baseline + environment stress matrix
     |-- work_report.22.md      # GUI advanced-parameter/cache/protein panels, haplotype
     |                          #   linkage, and the R aligner's real coverage (L13)
-    `-- work_report.23.md      # README-CN sync, window title + path separators,
-                               #   release 0.1.5 preparation
+    |-- work_report.23.md      # README-CN sync, window title + path separators,
+    |                          #   release 0.1.5 preparation
+    `-- work_report.24.md      # root README input-file contract, tmp/ category-A
+                               #   cleanup, and the loss of the R environment
 ```
 
 The original request and the requested deliverables are documented in
