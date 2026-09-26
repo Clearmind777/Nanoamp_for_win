@@ -3,6 +3,6 @@
   "route": "cds",
   "cds": { "start": 118, "end": 237, "strand": "+", "frame": 0, "boundaries": "inclusive" },
   "genetic_code": "Standard",
-  "amplicon_reference": "01_data/test_data/TSM20260826-020-01254/E4-3_TSM20260826-020-01254_20260827-020-BAN05-5_H08.1.seq",
+  "amplicon_reference": "01_data/TSM20260826/E4-3/reference.self.fa",
   "notes": "Offline fallback: give the CDS start/end on the amplicon reference. Needs no network and no reference files. amplicon_reference is documentation only; the pipeline never reads it. The coordinates above are the longest ORF of that 529 bp amplicon (ATG..TAG, 120 bp = 40 codons) and are meant as a working example: replace them with the CDS of your own amplicon. The CDS length MUST be a multiple of 3 - otherwise the annotation is skipped and the reason is recorded in qc.tsv and run_manifest.json."
 }
