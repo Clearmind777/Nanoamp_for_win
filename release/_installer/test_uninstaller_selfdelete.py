@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -143,8 +144,129 @@ def check_remove_tree_skipping() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def check_helper_is_invisible() -> None:
+    """The cleanup helper must not put a console window on screen.
+
+    The first version of it passed DETACHED_PROCESS, which gave cmd.exe a brand
+    new console - Windows displayed it, and because the retry loop calls ping,
+    the user saw a row of ping windows popping up during an uninstall.
+    """
+    captured: dict = {}
+    real_popen = un.subprocess.Popen
+
+    class _Fake:
+        pass
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _Fake()
+
+    root = Path(tempfile.mkdtemp(prefix="nanoamp-flags-"))
+    exe = root / "uninstall.exe"
+    exe.write_bytes(b"MZ")
+    script = Path(tempfile.gettempdir()) / f"nanoamp_finish_uninstall_{os.getpid()}.cmd"
+    script.unlink(missing_ok=True)
+    un.subprocess.Popen = fake_popen
+    try:
+        ok = un._schedule_final_cleanup(exe.resolve(), root)
+    finally:
+        un.subprocess.Popen = real_popen
+        script.unlink(missing_ok=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+    check(ok, "the helper still starts with a fake Popen")
+    flags = captured.get("kwargs", {}).get("creationflags", 0)
+    check(bool(flags & un.CREATE_NO_WINDOW), "the helper is started with CREATE_NO_WINDOW",
+          hex(flags))
+    check(not (flags & 0x00000008),
+          "and NOT with DETACHED_PROCESS (that is what showed a console)",
+          hex(flags))
+    startup = captured.get("kwargs", {}).get("startupinfo")
+    check(startup is not None, "the helper gets startup info")
+    if startup is not None:
+        check(bool(startup.dwFlags & un.subprocess.STARTF_USESHOWWINDOW)
+              and startup.wShowWindow == un.subprocess.SW_HIDE,
+              "which asks for a hidden window")
+
+    # And prove it for real: while the helper runs, neither it nor its ping
+    # children may own a visible top-level window.
+    root = Path(tempfile.mkdtemp(prefix="nanoamp-vis-"))
+    exe = root / "uninstall.exe"
+    exe.write_bytes(b"MZ")
+    fd = os.open(str(exe), os.O_RDONLY)          # keep it locked so the loop runs
+    try:
+        un._schedule_final_cleanup(exe.resolve(), root)
+        time.sleep(1.5)
+        windows = _visible_windows_of("cmd.exe") + _visible_windows_of("ping.exe")
+        check(not windows, "no visible cmd/ping window while the helper runs",
+              str(windows))
+    finally:
+        os.close(fd)
+        exe.unlink(missing_ok=True)
+        deadline = time.time() + 15
+        while time.time() < deadline and root.exists():
+            time.sleep(0.5)
+        shutil.rmtree(root, ignore_errors=True)
+        script = Path(tempfile.gettempdir()) / f"nanoamp_finish_uninstall_{os.getpid()}.cmd"
+        script.unlink(missing_ok=True)
+
+
+def _visible_windows_of(image: str) -> list[str]:
+    """Titles of visible top-level windows owned by `image` ('' titles included)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    found: list[str] = []
+
+    def pid_of(hwnd) -> int:
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+
+    image_of = {}
+    for entry in _process_list():
+        image_of[entry[0]] = entry[1].lower()
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        pid = pid_of(hwnd)
+        if image_of.get(pid, "").endswith(image):
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            found.append(buf.value or "(untitled)")
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return found
+
+
+def _process_list():
+    """[(pid, image name)] from tasklist, without extra dependencies."""
+    import csv
+    import io
+
+    try:
+        proc = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                              capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows = []
+    for row in csv.reader(io.StringIO(proc.stdout.decode("utf-8", errors="replace"))):
+        if len(row) >= 2:
+            try:
+                rows.append((int(row[1]), row[0]))
+            except ValueError:
+                continue
+    return rows
+
+
 def check_scheduled_cleanup() -> None:
-    """The detached helper deletes the exe and the directory after we exit."""
+    """The helper deletes the exe and the directory after we exit."""
     root = Path(tempfile.mkdtemp(prefix="nanoamp-sched-"))
     exe = root / "uninstall.exe"
     exe.write_bytes(b"MZ")
@@ -183,6 +305,9 @@ check_remove_tree_skipping()
 
 print("\n=== 4) the detached helper finishes the job ===")
 check_scheduled_cleanup()
+
+print("\n=== 5) the helper must not show a console window ===")
+check_helper_is_invisible()
 
 print()
 if failures:

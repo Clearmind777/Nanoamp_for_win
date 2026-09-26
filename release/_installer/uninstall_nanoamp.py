@@ -46,7 +46,6 @@ from nanoamp_common import (
 
 APP_TITLE = "nanoamp 卸载程序"
 CREATE_NO_WINDOW = 0x08000000
-DETACHED_PROCESS = 0x00000008
 
 # Fixed width for the window; fit_to_content() only varies the height.
 WINDOW_WIDTH = 760
@@ -570,15 +569,40 @@ def _remove_tree_skipping(root: Path, skip: set[Path]) -> None:
             f"目录未能完全删除：{leftovers[0]}")
 
 
+def _hidden_subprocess_kwargs() -> dict:
+    """Launch a console helper with no window at all.
+
+    Two things matter here, and getting either wrong puts black windows on the
+    user's screen:
+
+    * ``CREATE_NO_WINDOW`` creates the helper's console *hidden*; its children
+      (ping, del, rmdir) inherit that hidden console, so nothing flashes.
+    * ``DETACHED_PROCESS`` must NOT be used: it gives the helper a brand new
+      console, which Windows then displays - that is what made a row of ping
+      windows pop up on screen. The helper does not need to be "detached" to
+      outlive this process; it is a separate process either way.
+    * The startup info is belt and braces for the same reason.
+    """
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": CREATE_NO_WINDOW,
+        "startupinfo": startup,
+        "close_fds": True,
+    }
+
+
 def _schedule_final_cleanup(exe: Path, root: Path) -> bool:
     """Delete `exe` and the (now empty) `root` after this process exits.
 
     Windows refuses to delete a running executable, so the last step is handed
-    to a detached cmd.exe: it waits until this process is gone and then removes
-    the file and the directory. The paths are passed as arguments, so the script
-    itself is pure ASCII and no path (spaces, ampersands, Chinese characters)
-    has to survive being written into a batch file. The helper removes itself
-    too, so nothing is left in %TEMP%.
+    to a separate cmd.exe helper: it retries the delete until this process has
+    exited and then removes the file and the directory. The paths are passed as
+    arguments, so the script itself is pure ASCII and no path (spaces,
+    ampersands, Chinese characters) has to survive being written into a batch
+    file. The helper removes itself too, so nothing is left in %TEMP%, and it
+    runs with no visible window (see _hidden_subprocess_kwargs).
     """
     script = Path(tempfile.gettempdir()) / f"nanoamp_finish_uninstall_{os.getpid()}.cmd"
     body = (
@@ -586,7 +610,7 @@ def _schedule_final_cleanup(exe: Path, root: Path) -> bool:
         "rem %1 = uninstall.exe, %2 = install directory.\r\n"
         "rem Windows keeps a running exe locked, so retry the delete until it\r\n"
         "rem succeeds (it does as soon as this process has exited).\r\n"
-        "for /l %%i in (1,1,120) do (\r\n"
+        "for /l %%i in (1,1,60) do (\r\n"
         "  del /f /q %1 >nul 2>&1\r\n"
         "  if not exist %1 goto :gone\r\n"
         "  ping -n 2 127.0.0.1 >nul\r\n"
@@ -603,8 +627,7 @@ def _schedule_final_cleanup(exe: Path, root: Path) -> bool:
     try:
         subprocess.Popen(
             ["cmd.exe", "/c", str(script), str(exe), str(root)],
-            creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
-            close_fds=True,
+            **_hidden_subprocess_kwargs(),
         )
     except OSError as exc:
         print(f"无法启动延迟删除脚本：{exc}")

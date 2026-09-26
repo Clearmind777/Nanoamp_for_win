@@ -87,13 +87,43 @@
 - `--dry-run` 仍然只报告不删除（验证里用过）；
 - `uninstall.exe` 依旧可以单独拷走使用（不依赖 `_offline/`、不依赖安装包）。
 
+## 5b. 补修：自删除 helper 会弹出可见控制台窗口（使用者报告）
+
+使用者反馈："刚刚你在工作时，不停弹出 `ping 127.0.0.1` 的终端弹窗"。原因就在本轮的
+helper 上：
+
+- 我用 `ping -n 2 127.0.0.1 >nul` 做延时（在批处理里这是最省事、最通用的等待），
+  每次循环都会**启动一个 ping 进程**；
+- 启动 helper 时我同时给了 `CREATE_NO_WINDOW | DETACHED_PROCESS`。这两个标志是冲突的：
+  `DETACHED_PROCESS` 使子进程**不继承父进程的控制台**，于是 Windows 给它**新建**一个
+  控制台并显示出来 —— cmd 与它派生的 ping 因此每次都在屏幕上闪一个窗口。
+  （`CREATE_NO_WINDOW` 的本意是"创建但不显示控制台"，被 DETACHED_PROCESS 覆盖了。）
+
+修法：
+
+1. **去掉 `DETACHED_PROCESS`**（helper 本来就不需要它：它是独立进程，父进程退出后照样
+   继续跑），保留 `CREATE_NO_WINDOW`，并额外传 `STARTUPINFO`（`STARTF_USESHOWWINDOW` +
+   `SW_HIDE`）双保险；延时仍用 `ping`（现在跑在隐藏控制台里），重试次数由 120 降为 60；
+2. 新增自测 **第 5 节**（`test_uninstaller_selfdelete.py`）：
+   - 用假的 `Popen` 断言启动参数里**有** `CREATE_NO_WINDOW`、**没有** `DETACHED_PROCESS`，
+     且有隐藏窗口的 startupinfo；
+   - 再用 `EnumWindows` + `tasklist` **实测**：helper 运行期间，`cmd.exe` / `ping.exe`
+     拥有的可见顶层窗口数为 **0**；
+3. 端到端脚本 `tmp/verify_round28_uninstall.ps1` 也加了同样的实测：卸载过程中轮询
+   `Get-Process cmd,ping | Where MainWindowHandle -ne 0`，本次结果 `(none)`。
+
+> 结论：`ping` 弹窗是我这边引入的临时问题（只出现在卸载的最后一步），不是 Windows 或
+> 使用者环境的问题；修好后既不再有窗口，也不改变删除行为（安装目录、`uninstall.exe`、
+> `config.ini`、位置指针照旧全部清理干净）。
+
 ## 6. 提交与推送
 
 - 代码：`release/_installer/install_nanoamp.py`、`release/_installer/uninstall_nanoamp.py`、
   `release/_installer/nanoamp_common.py`、新增 `release/_installer/test_uninstaller_selfdelete.py`；
 - 文档：`release/README.md`、`release/RELEASE_NOTES-0.1.5.md`、`README.md`、`README-CN.md`、
   `00_materials/tutorial.md`、本报告与索引；
-- 产物：`release/install.exe`、`release/uninstall.exe`、`release/_build/SHA256SUMS.txt`；
+- 产物：`release/install.exe`、`release/uninstall.exe`、`release/_build/SHA256SUMS.txt`
+  （setup 包最终 sha256 `5b273c03…`：去 `DETACHED_PROCESS` 后又重建了一次 uninstall.exe）；
 - **Release 仍未上传**：仓库里的 setup 包与已发布的 v0.1.5 同名但内容不同，要发布请新建
   tag（例如 v0.1.6）。
 
