@@ -109,6 +109,9 @@ nanoamp help
 | `cds`（离线） | 否 | 扩增子参考上的 CDS 区间、链与读码框（长度必须是 3 的倍数） |
 | `genome`（在线） | 是 | 无需提供：程序自行在 GRCh38 定位扩增子并从 Ensembl REST 取转录本结构 |
 
+图形界面在选好**目的序列**后会把「CDS 止」按该序列长度**预填**（提示行标明这是预填值，
+可改；改过之后窗口不再覆盖它），命令行没有这个预填，`cds.start/end` 必须自己给。
+
 被跳过的转录本会记账（`qc.tsv` 的 `annotation_skip_reason`、
 `run_manifest.json` 的 `annotation.skipped_transcripts`），此时退出码仍是 0；
 `--strict` 才会把它变成失败。命令行还可以用 `--transcript <ENST…|all>` 指定注释哪一个
@@ -126,6 +129,11 @@ nanoamp help
 `error_class` = `input`/`environment`/`network`/`internal`、`error_message`、
 `log_path`）与 `nanoamp.log`。**失败的运行也会创建输出目录并写下这两个文件**；
 退出码仍然是 0（成功）/ 1（失败）。图形界面会按 `error_class` 给出对应的提示。
+
+结果表是**覆盖写**的：同一次运行的注释两页只显示本次产生的内容，输出目录里若还留着
+上一次的 `annotation.tsv`，界面会提示"未显示"而不是画成新结果。点「开始分析」会清空六个
+标签页（「运行日志」除外，它是会话历史），上一次的结果保留在内存里，可点「查看上次结果」
+回看，直到关闭程序。窗口启动时会往日志里写「仓库根目录 / Rscript / minimap2」三行实际路径。
 
 ## 测试数据：`01_data/<dataset>/<sample>/`
 
@@ -183,6 +191,11 @@ source_dir / source_file / source_note`）。功能回归会自动发现所有�
 1. `NANOAMP_MINIMAP2` / `NANOAMP_SAMTOOLS`；
 2. `03_dependence/<os>-<arch>/bin/`（Windows 下为 `.exe`）；
 3. `PATH`。
+
+安装版里第 1 条由图形界面自己设置：它会找到安装目录（默认 `%LOCALAPPDATA%\nanoamp`，
+换过安装位置时由 `%LOCALAPPDATA%\nanoamp.path` 指向）并把 `<安装目录>\bin\minimap2.exe`
+固定给 R，**因此"安装时不勾选加入 PATH"也照样能用**；该文件由 `install.exe` 无条件复制，
+窗口启动时会把它的实际路径写进运行日志第一屏。
 
 仓库已内置 **Windows x86_64 的 minimap2 2.31**，由本仓库从上游源码编译并静态链接，
 运行时不需要 MSYS2 / Cygwin / conda / WSL（只依赖 `KERNEL32.dll` 和 `msvcrt.dll`）。

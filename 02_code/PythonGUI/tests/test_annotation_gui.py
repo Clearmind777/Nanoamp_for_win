@@ -449,6 +449,209 @@ check("没有蛋白序列" in app._protein_text("nope"),
 app._open_protein_view() if app.annot_tree.get_children() else None
 check(True, "loading a directory without annotation files does not raise")
 
+print("\n=== 6j) a previous run's annotation files are not shown as this run's ===")
+# The reported bug: run once with annotation, then turn it off and run again into
+# the same output directory. R does not delete annotation.tsv, so reading the
+# file on sight showed the earlier consequences with empty counts
+# ("已注释  个转录本、  个单倍型（来源： ）。共 12 行后果。").
+stale = Path(tempfile.mkdtemp(prefix="nanoamp_gui_stale_"))
+(stale / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tFALSE\nannotation_available\tFALSE\n"
+    "n_reads\t120\n",
+    encoding="utf-8",
+)
+(stale / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\tconsequence_any_transcript_zh\t"
+    "transcript_conflict\tprotein_change\tvariants\n"
+    "H1\tT1\t无变异\t无变异\tFALSE\tp.(=)\t.\n"
+    "H2\tT1\t错义\t错义\tFALSE\tp.Lys2Glu\t50G>A\n",
+    encoding="utf-8",
+)
+(stale / "variants_annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\ttype\tconsequence_zh\nH2\tT1\tsnv\t错义\n",
+    encoding="utf-8",
+)
+app.var_annot_detail.set(True)
+app._append_log("=== 6j marker ===")
+app._load_annotation(stale)
+log_now = app.log_text.get("1.0", "end")
+check(len(app.annot_tree.get_children()) == 0,
+      "leftover annotation.tsv is not drawn as this run's result",
+      f"{len(app.annot_tree.get_children())} rows")
+check(len(app.var_annot_tree.get_children()) == 0,
+      "leftover variants_annotation.tsv is not drawn either",
+      f"{len(app.var_annot_tree.get_children())} rows")
+check("本次未运行功能注释" in app.annot_status.get(),
+      "the tab says the run did not annotate", app.annot_status.get()[:70])
+check("annotation.tsv" in app.annot_status.get() and "未显示" in app.annot_status.get(),
+      "it names the leftover file and says it is not shown",
+      app.annot_status.get()[:80])
+check(app.annotation_records == [] and app.variant_records == [],
+      "no stale records stay loaded either")
+check("已注释" not in log_now.split("=== 6j marker ===")[-1],
+      "the log no longer prints a line of empty counts")
+
+# A run that skipped annotation (requested but unavailable) must also stay empty
+# even when an earlier successful run left its tables behind.
+skipped = Path(tempfile.mkdtemp(prefix="nanoamp_gui_skipped_"))
+(skipped / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tTRUE\nannotation_available\tFALSE\n"
+    "annotation_skip_reason\tCDS 长度不是 3 的倍数\n",
+    encoding="utf-8",
+)
+(skipped / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\nH1\tT1\t无变异\n", encoding="utf-8")
+app._load_annotation(skipped)
+check("注释不可用" in app.annot_status.get() and not app.annot_tree.get_children(),
+      "a skipped annotation shows the reason, not old rows", app.annot_status.get()[:70])
+
+print("\n=== 6k) a new run clears every page and keeps the previous one in memory ===")
+run1 = Path(tempfile.mkdtemp(prefix="nanoamp_gui_run1_"))
+(run1 / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tTRUE\nannotation_available\tTRUE\n"
+    "n_transcripts_annotated\t1\nn_transcripts_skipped\t0\n"
+    "n_haplotypes_annotated\t2\nannotation_source\tcds-config\n",
+    encoding="utf-8",
+)
+(run1 / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\tconsequence_any_transcript_zh\t"
+    "transcript_conflict\tprotein_change\tvariants\n"
+    "H1\tT1\t无变异\t无变异\tFALSE\tp.(=)\t.\n"
+    "H2\tT1\t错义\t错义\tFALSE\tp.Lys2Glu\t50G>A\n",
+    encoding="utf-8",
+)
+(run1 / "variants_annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\ttype\tconsequence_zh\nH2\tT1\tsnv\t错义\n",
+    encoding="utf-8",
+)
+(run1 / "haplotypes.tsv").write_text(
+    "rank\thaplotype_id\tcount\tproportion\tci_low\tci_high\tis_reference\t"
+    "n_snv\tn_ins\tn_del\tlength\tvariants\n"
+    "1\tH1\t100\t0.6\t0.5\t0.7\tTRUE\t0\t0\t0\t300\t.\n"
+    "2\tH2\t60\t0.4\t0.3\t0.5\tFALSE\t1\t0\t0\t300\t50G>A\n",
+    encoding="utf-8",
+)
+(run1 / "haplotypes.fasta").write_text(">H1_300\nACGT\n>H2_300\nACGA\n", encoding="utf-8")
+
+# run 1 finished (the pages are cleared at the start of a run, so model that)
+app.last_outdir = run1
+app._clear_results()
+app._load_results(run1)
+app._remember_current_view()
+app._set_annot_filter("H2")
+check(len(app.tree.get_children()) == 2 and len(app.annot_tree.get_children()) == 1,
+      "run 1 is on screen", f"{len(app.tree.get_children())} / "
+      f"{len(app.annot_tree.get_children())} rows")
+
+# run 2 starts: the pages are initialised, the previous run is cached
+app._append_log("=== 6k marker：运行日志不被清空 ===")
+app._keep_previous_results()
+check(app._snapshot_has_content(app._last_results),
+      "the previous run is cached before the pages are cleared")
+app._clear_results()
+check(not app.tree.get_children() and not app.files_tree.get_children()
+      and not app.annot_tree.get_children() and not app.var_annot_tree.get_children(),
+      "every result table is empty while the run is in progress")
+check(app.qc_text.get("1.0", "end").strip() == ""
+      and app.seq_box.get("1.0", "end").strip() == "",
+      "the QC page and the sequence box are empty too")
+check(app.annotation_records == [] and app.variant_records == []
+      and app.annot_filter is None and app.var_annot_filter.get() == "",
+      "the loaded rows and the haplotype filter are reset",
+      f"filter={app.annot_filter!r} {app.var_annot_filter.get()!r}")
+check("进行中" in app.annot_status.get(),
+      "the annotation tabs say a run is in progress", app.annot_status.get())
+check("=== 6k marker" in app.log_text.get("1.0", "end"),
+      "the run log is kept: it is the session's history, not one run's result")
+check(str(app.btn_last.cget("state")) == "normal",
+      "the 查看上次结果 button lights up once there is a previous run")
+check(app.btn_last.cget("text") == "查看上次结果", "and offers to show the previous run")
+
+# run 2 finished with a different result
+run2 = Path(tempfile.mkdtemp(prefix="nanoamp_gui_run2_"))
+(run2 / "qc.tsv").write_text("metric\tvalue\nn_reads\t9\n", encoding="utf-8")
+(run2 / "haplotypes.tsv").write_text(
+    "rank\thaplotype_id\tcount\tproportion\tci_low\tci_high\tis_reference\t"
+    "n_snv\tn_ins\tn_del\tlength\tvariants\n"
+    "1\tH9\t9\t1.0\t0.9\t1.0\tTRUE\t0\t0\t0\t300\t.\n",
+    encoding="utf-8",
+)
+app.last_outdir = run2
+app._load_results(run2)
+app._remember_current_view()
+check([app.tree.item(i, "values")[1] for i in app.tree.get_children()] == ["H9"],
+      "run 2's own result is shown", str(app.tree.get_children()))
+
+app._toggle_last_results()
+check([app.tree.item(i, "values")[1] for i in app.tree.get_children()] == ["H1", "H2"],
+      "the button brings the previous run back", str(app.tree.get_children()))
+check("上一次运行" in app.annot_status.get(),
+      "the previous run is labelled as such", app.annot_status.get()[:80])
+check(app.btn_last.cget("text") == "返回本次结果", "the button offers to come back")
+check(len(app.annot_tree.get_children()) == 1
+      and "仅显示 H2" in app.var_annot_filter.get(),
+      "the previous annotation table and its filter come back too",
+      f"{len(app.annot_tree.get_children())} rows, {app.var_annot_filter.get()[:20]}")
+app._toggle_last_results()
+check([app.tree.item(i, "values")[1] for i in app.tree.get_children()] == ["H9"],
+      "and coming back shows this run again", str(app.tree.get_children()))
+check("上一次运行" not in app.annot_status.get(),
+      "with the previous-run label removed", app.annot_status.get()[:60])
+check(app.btn_last.cget("text") == "查看上次结果", "the button label is back")
+
+# A window that never ran anything has nothing to offer.
+app._last_results = None
+app._update_last_button()
+check(str(app.btn_last.cget("state")) == "disabled",
+      "without a previous run the button is disabled")
+
+print("\n=== 6l) the CDS end is filled in from the reference length ===")
+cds_dir = Path(tempfile.mkdtemp(prefix="nanoamp_gui_cds_"))
+reference = cds_dir / "reference.self.fa"
+reference.write_text(">amp\n" + "ACG" * 20 + "\n", encoding="utf-8")     # 60 bp
+app.var_annot_on.set(True)
+app.var_annot_source.set(ANNOTATION_OFFLINE)
+app.var_reference.set(str(reference))
+app.var_cds_start.set("1")
+app._cds_auto_end = None
+app.var_cds_end.set("")
+app._sync_annotation_state()
+check(app.var_cds_end.get() == "60", "the amplicon length becomes the default 止",
+      app.var_cds_end.get())
+check("预填" in app.var_annot_hint.get(), "the hint says the value is a prefill",
+      app.var_annot_hint.get()[:70])
+check("60 bp" in app.var_annot_hint.get(), "and the CDS length is still computed",
+      app.var_annot_hint.get()[:70])
+check("预填" in app.log_text.get("1.0", "end"), "the prefill is logged for diagnosis")
+
+# a new reference replaces a value the window itself put there
+reference.write_text(">amp\n" + "ACG" * 21 + "\n", encoding="utf-8")     # 63 bp
+app._sync_annotation_state()
+check(app.var_cds_end.get() == "63", "changing the reference updates a prefilled 止",
+      app.var_cds_end.get())
+
+# a coordinate the user typed is never overwritten
+app.var_cds_end.set("237")
+app._sync_annotation_state()
+check(app._cds_auto_end is None, "the window lets go of a value the user typed")
+check("预填" not in app.var_annot_hint.get(), "and stops calling it prefilled",
+      app.var_annot_hint.get()[:70])
+reference.write_text(">amp\n" + "ACG" * 30 + "\n", encoding="utf-8")     # 90 bp
+app._sync_annotation_state()
+check(app.var_cds_end.get() == "237", "the user's coordinate survives a new reference",
+      app.var_cds_end.get())
+check(app._cds_problem() == "", "and the form still validates")
+
+# no reference (or none chosen yet) means no default to offer
+app.var_reference.set(str(cds_dir / "missing.fa"))
+app.var_cds_end.set("")
+app._cds_auto_end = None
+app._sync_annotation_state()
+check(app.var_cds_end.get() == "", "a missing reference file fills nothing in",
+      app.var_cds_end.get())
+app.var_annot_on.set(False)
+app._sync_annotation_state()
+
 print("\n=== 7) the window still fits with the new panels ===")
 # The optional panels are off here: with them hidden the window keeps its
 # original footprint; each panel that is switched on grows the requested height,
@@ -491,10 +694,21 @@ app._sync_annotation_state()
 root.update()
 check(app.btn_run.winfo_ismapped(), "the run button is visible with both panels off")
 # The buttons in the action row must not be stacked on top of each other.
-buttons = [app.btn_run, app.btn_doctor, app.btn_copy_diag, app.btn_cancel, app.btn_open]
+buttons = [app.btn_run, app.btn_doctor, app.btn_copy_diag, app.btn_cancel, app.btn_open,
+           app.btn_last]
 xs = [b.winfo_x() for b in buttons]
 check(len(set(xs)) == len(xs), "the action buttons each have their own column",
       f"x={xs}")
+right = max(b.winfo_x() + b.winfo_width() for b in buttons + [app.progress])
+check(right <= 1040, "every action button fits inside the default window width",
+      f"right edge {right} px")
+root.geometry("880x720")
+root.update()
+right_small = max(b.winfo_x() + b.winfo_width() for b in buttons + [app.progress])
+check(right_small <= 880, "and they still fit at the minimum window size",
+      f"right edge {right_small} px")
+root.geometry("1040x720")
+root.update()
 
 app.var_annot_on.set(True)
 app.var_annot_source.set(ANNOTATION_OFFLINE)

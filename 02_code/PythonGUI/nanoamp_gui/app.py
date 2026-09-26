@@ -26,7 +26,12 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .r_runner import NanoampRunner, RNotFoundError, find_rscript
+from .r_runner import (
+    NanoampRunner,
+    RNotFoundError,
+    _configured_paths,
+    find_rscript,
+)
 
 # Window title and the heading inside the window. Deliberately just the program
 # name: the window is the only thing a user sees and the descriptive suffix only
@@ -126,32 +131,27 @@ def find_repo_root(start: Path) -> Path:
     Resolution order:
 
     1. ``NANOAMP_HOME`` environment variable, if set;
-    2. ``%LOCALAPPDATA%\\nanoamp\\config.ini``, written by install.exe - this is
-       how an installed nanoamp.exe finds the data directory it was installed
-       against, since the exe no longer lives inside that directory;
+    2. the install location recorded by install.exe - ``config.ini`` either at
+       the default ``%LOCALAPPDATA%\\nanoamp`` or at the location named by the
+       ``%LOCALAPPDATA%\\nanoamp.path`` pointer file the installer writes when
+       the user picked somewhere else. This is how an installed nanoamp.exe
+       finds the directory it was installed against, since the exe no longer
+       lives inside that directory;
     3. walking upwards from ``start`` looking for a repository marker.
 
-    Returning the wrong directory is recoverable: the window still opens and
-    the user can pick any input/output paths by hand. Only the bundled
-    minimap2.exe lookup and the default output directory depend on it.
+    Step 2 uses r_runner's resolver so the window cannot disagree with the R
+    lookup about where the installation is. Getting it wrong is not fatal - the
+    window still opens and every input path can be picked by hand - but it does
+    silently lose ``<install>\\bin\\minimap2.exe``, which is exactly the binary a
+    user who did not add nanoamp to PATH depends on.
     """
     env = os.environ.get("NANOAMP_HOME")
     if env and Path(env).is_dir():
         return Path(env).resolve()
 
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        ini = Path(local) / "nanoamp" / "config.ini"
-        if ini.is_file():
-            try:
-                for line in ini.read_text(encoding="utf-8").splitlines():
-                    if line.strip().startswith("home"):
-                        _, _, value = line.partition("=")
-                        candidate = Path(value.strip().strip('"'))
-                        if candidate.is_dir():
-                            return candidate.resolve()
-            except OSError:
-                pass
+    configured_home = _configured_paths().get("home")
+    if configured_home is not None and configured_home.is_dir():
+        return configured_home.resolve()
 
     p = start.resolve()
     for _ in range(8):
@@ -253,6 +253,21 @@ class NanoampApp(ttk.Frame):
         self.annot_filter: str | None = None
         self._annot_displayed: dict[str, dict[str, str]] = {}
 
+        # Every result page is cleared when a new analysis starts. What was on
+        # screen before is kept here, in memory only, until the window closes:
+        # `_last_results` is the run before the current one, `_current_view` is
+        # the current one, and `_showing_last` says which of the two is on
+        # screen. See _toggle_last_results().
+        self._last_results: dict | None = None
+        self._current_view: dict | None = None
+        self._showing_last = False
+
+        # The CDS end that the window filled in from the reference length. Only
+        # a value that is still this one may be replaced when the reference
+        # changes - a coordinate the user typed is never overwritten.
+        self._cds_auto_end: str | None = None
+        self._prefilling_cds = False
+
         self._build_layout()
         self._detect_environment()
         self.after(100, self._drain_log_queue)
@@ -343,7 +358,7 @@ class NanoampApp(ttk.Frame):
         # -- actions
         actions = ttk.Frame(self)
         actions.grid(row=5, column=0, sticky="ew")
-        actions.columnconfigure(6, weight=1)
+        actions.columnconfigure(7, weight=1)
 
         self.btn_run = ttk.Button(actions, text="开始分析", command=self._on_run)
         self.btn_run.grid(row=0, column=0)
@@ -363,8 +378,15 @@ class NanoampApp(ttk.Frame):
         )
         self.btn_open.grid(row=0, column=4, padx=(6, 0))
 
+        # Every page is cleared when a run starts, so the previous run's numbers
+        # are kept in memory and can be brought back until the window closes.
+        # Disabled until there is something to show.
+        self.btn_last = ttk.Button(actions, text="查看上次结果",
+                                   command=self._toggle_last_results, state="disabled")
+        self.btn_last.grid(row=0, column=5, padx=(6, 0))
+
         self.progress = ttk.Progressbar(actions, mode="indeterminate", length=140)
-        self.progress.grid(row=0, column=5, padx=(12, 0))
+        self.progress.grid(row=0, column=6, padx=(12, 0))
 
         status = ttk.Label(self, textvariable=self.var_status, anchor="w", foreground="#333333")
         status.grid(row=6, column=0, sticky="ew", pady=(6, 0))
@@ -633,7 +655,8 @@ class NanoampApp(ttk.Frame):
         self._annot_hidden = [box]
 
         for var in (self.var_cds_start, self.var_cds_end, self.var_cds_strand,
-                    self.var_cds_frame, self.var_annot_source, self.var_annot_on):
+                    self.var_cds_frame, self.var_annot_source, self.var_annot_on,
+                    self.var_reference):
             var.trace_add("write", lambda *_: self._sync_annotation_state())
         self._sync_annotation_state()
 
@@ -683,6 +706,7 @@ class NanoampApp(ttk.Frame):
             self.var_annot_hint.set("")
             return
         if offline:
+            self._prefill_cds_end()
             problem = self._cds_problem()
             if problem:
                 self.var_annot_hint.set(f"离线 CDS 路线：{problem}")
@@ -690,9 +714,11 @@ class NanoampApp(ttk.Frame):
                 start = self._int_or_none(self.var_cds_start.get())
                 end = self._int_or_none(self.var_cds_end.get())
                 length = (end - start + 1) if (start and end) else None
+                prefilled = ("（「止」是按目的序列长度预填的，请按实际 CDS 修改）"
+                             if self._cds_auto_end else "")
                 self.var_annot_hint.set(
                     f"离线 CDS 路线：不联网。CDS 长度 {length} bp"
-                    f"（{length // 3 if length else 0} 个密码子）。"
+                    f"（{length // 3 if length else 0} 个密码子）{prefilled}。"
                     "坐标以目的序列（扩增子参考）为准，1-based。")
         elif source == ANNOTATION_ONLINE:
             self.var_annot_hint.set(
@@ -742,6 +768,64 @@ class NanoampApp(ttk.Frame):
             return int(str(text).strip())
         except (TypeError, ValueError):
             return None
+
+    def _reference_length(self) -> int | None:
+        """Length of the first sequence in 目的序列, or None if unknown.
+
+        Only the first record is counted, and reading stops at the second
+        header: that is the sequence R itself uses, and a genome-sized FASTA
+        must not be read to the end just to fill in one field.
+        """
+        text = self.var_reference.get().strip()
+        if not text:
+            return None
+        path = Path(text)
+        if not path.is_file():
+            return None
+        length = 0
+        seen_header = False
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith(">"):
+                        if seen_header:
+                            break
+                        seen_header = True
+                        continue
+                    if seen_header:
+                        length += len(line.strip())
+        except OSError:
+            return None
+        return length or None
+
+    def _prefill_cds_end(self) -> None:
+        """Offer the amplicon length as the default 「CDS 止」.
+
+        The offline route needs the CDS interval on the amplicon reference. The
+        only value the window can know by itself is the amplicon length, so it
+        is filled in as a starting point - labelled as such in the hint - and
+        the existing validation still refuses a length that is not a multiple of
+        three. A coordinate the user typed is never overwritten.
+        """
+        if self._prefilling_cds:
+            return                      # our own write, arriving back here
+        current = self.var_cds_end.get().strip()
+        if current and current != self._cds_auto_end:
+            self._cds_auto_end = None   # the user took over: stop calling it ours
+            return
+        length = self._reference_length()
+        if length is None:
+            return
+        value = str(length)
+        if current != value:
+            self._prefilling_cds = True
+            try:
+                self.var_cds_end.set(value)
+            finally:
+                self._prefilling_cds = False
+            self._append_log(
+                f"[GUI] 已按目的序列长度预填「CDS 止」= {value}（请按实际 CDS 修改）。")
+        self._cds_auto_end = value
 
     def _cds_problem(self) -> str:
         """Return a human-readable problem with the CDS form, or ""."""
@@ -1015,6 +1099,11 @@ class NanoampApp(ttk.Frame):
             return
         self._append_log(f"仓库根目录 : {self.repo_root}")
         self._append_log(f"Rscript    : {self.runner.rscript}")
+        # Which aligner the window will use belongs in the log: a machine that
+        # installed without the PATH option has exactly one copy, and "minimap2
+        # not found" is otherwise only visible after an analysis has failed.
+        minimap2 = self.runner.minimap2_path()
+        self._append_log(f"minimap2   : {minimap2 if minimap2 else '未找到（模式 A/B 需要比对程序）'}")
         self._append_log("初始化完成。")
 
     # ------------------------------------------------------------ actions
@@ -1121,6 +1210,7 @@ class NanoampApp(ttk.Frame):
                 argv.append("--annotation-detail")
             if self.var_annot_proteins.get():
                 argv.append("--annotation-proteins")
+        self._keep_previous_results()
         self._clear_results()
         self._cancel_requested = False
         self._set_running(True)
@@ -1346,6 +1436,7 @@ class NanoampApp(ttk.Frame):
             f"nanoamp GUI：{APP_TITLE}",
             f"仓库根目录: {self.repo_root}",
             f"Rscript: {self.runner.rscript if self.runner else '(未检测)'}",
+            f"minimap2: {self.runner.minimap2_path() if self.runner else '(未检测)'}",
             "--- 运行日志 ---",
         ]
         try:
@@ -1471,6 +1562,7 @@ class NanoampApp(ttk.Frame):
             self.var_status.set(f"分析已取消。部分结果保留在：{outdir}")
             if outdir.is_dir():
                 self.btn_open.configure(state="normal")
+            self._remember_current_view()
             messagebox.showinfo(
                 "已取消",
                 "分析已取消。\n\n"
@@ -1479,14 +1571,22 @@ class NanoampApp(ttk.Frame):
             return
         if code != 0:
             self._report_failure(code, outdir)
+            self._remember_current_view()
             return
         self.btn_open.configure(state="normal")
         self._load_results(outdir)
         n = len(self.tree.get_children())
         self.var_status.set(f"分析完成，输出目录：{outdir}（{n} 条单倍型）")
+        self._remember_current_view()
 
     # ------------------------------------------------------------ results
     def _clear_results(self) -> None:
+        """Put every result page back to its initial, empty state.
+
+        Called when a run starts, so nothing on screen can be mistaken for the
+        run that is about to happen. The log tab is deliberately untouched: it
+        is a history of this session, not a result of one run.
+        """
         for item in self.tree.get_children():
             self.tree.delete(item)
         for item in self.files_tree.get_children():
@@ -1496,9 +1596,123 @@ class NanoampApp(ttk.Frame):
                 tree.delete(item)
         self.annot_status.set("分析进行中…")
         self.var_annot_status.set("分析进行中…")
+        self.var_annot_filter.set("")
+        self.var_variant_filter.set("")
         self._set_text(self.qc_text, "")
         self._set_text(self.seq_box, "")
         self.fasta_cache.clear()
+        # The loaded annotation rows and the haplotype filter refer to the run
+        # that just ended; keeping them would let the protein view or the filter
+        # label describe results that are no longer on screen.
+        self.annotation_records = []
+        self.variant_records = []
+        self._annot_displayed = {}
+        self.annot_filter = None
+        self._showing_last = False
+        self._update_last_button()
+
+    # -- keeping the previous run's pages -----------------------------------
+    @staticmethod
+    def _tree_rows(tree: tk.ttk.Treeview) -> list[tuple[str, tuple]]:
+        """(iid, values) for every row, so a table can be redrawn without a file."""
+        return [(iid, tuple(tree.item(iid, "values"))) for iid in tree.get_children()]
+
+    def _page_snapshot(self) -> dict:
+        """Everything the result pages currently show, as plain data."""
+        return {
+            "taken_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "outdir": str(self.last_outdir or ""),
+            "tree": self._tree_rows(self.tree),
+            "files": self._tree_rows(self.files_tree),
+            "qc": self.qc_text.get("1.0", "end").rstrip("\n"),
+            "seq": self.seq_box.get("1.0", "end").rstrip("\n"),
+            "annotation_records": list(self.annotation_records),
+            "variant_records": list(self.variant_records),
+            "annot_filter": self.annot_filter,
+            "fasta_cache": dict(self.fasta_cache),
+            "annot_status": self.annot_status.get(),
+            "variant_annot_status": self.var_annot_status.get(),
+        }
+
+    @staticmethod
+    def _snapshot_has_content(view: dict | None) -> bool:
+        if not view:
+            return False
+        return bool(view["tree"] or view["files"] or view["annotation_records"]
+                    or view["variant_records"] or view["qc"].strip())
+
+    def _render_snapshot(self, view: dict, suffix: str) -> None:
+        """Draw a cached page snapshot, labelled with `suffix` when it is older."""
+        for tree, key in ((self.tree, "tree"), (self.files_tree, "files")):
+            for item in tree.get_children():
+                tree.delete(item)
+            for iid, values in view[key]:
+                tree.insert("", "end", iid=iid, values=values)
+        # The annotation tabs are redrawn from their rows so that the protein
+        # view's row index and the filter label are rebuilt with them.
+        self.annotation_records = list(view["annotation_records"])
+        self.variant_records = list(view["variant_records"])
+        self.annot_filter = view["annot_filter"]
+        self._render_annotation_rows()
+        self._render_variant_annotation_rows()
+        self.annot_status.set(view["annot_status"] + suffix)
+        self.var_annot_status.set(view["variant_annot_status"] + suffix)
+        self._set_text(self.qc_text, view["qc"])
+        self._set_text(self.seq_box, view["seq"])
+        self.fasta_cache = dict(view["fasta_cache"])
+        self.last_outdir = Path(view["outdir"]) if view["outdir"] else None
+
+    def _update_last_button(self) -> None:
+        has_previous = self._snapshot_has_content(self._last_results)
+        self.btn_last.configure(
+            state="normal" if has_previous else "disabled",
+            text="返回本次结果" if self._showing_last else "查看上次结果",
+        )
+
+    def _keep_previous_results(self) -> None:
+        """Cache what is on screen before a new run clears it.
+
+        Only a view of the latest run may become "the previous run": if the
+        user is looking at already-cached results, that cache is the newest
+        thing there is and must not be replaced by itself.
+        """
+        if self._showing_last:
+            return
+        current = self._page_snapshot()
+        if self._snapshot_has_content(current):
+            self._last_results = current
+        self._update_last_button()
+
+    def _remember_current_view(self) -> None:
+        """Remember what this run produced, so the toggle can come back to it."""
+        self._current_view = self._page_snapshot()
+        self._showing_last = False
+        self._update_last_button()
+
+    def _toggle_last_results(self) -> None:
+        """Show the run before this one, or come back to this one."""
+        if self._showing_last:
+            if self._current_view is None:
+                self._clear_results()
+                self.var_status.set("已回到本次结果（本次运行没有产生可显示的结果）。")
+            else:
+                self._render_snapshot(self._current_view, "")
+                if self._current_view["outdir"]:
+                    self.var_status.set(
+                        f"已回到本次结果，输出目录：{self._current_view['outdir']}")
+            self._showing_last = False
+            self._update_last_button()
+            return
+
+        view = self._last_results
+        if not self._snapshot_has_content(view):
+            return
+        assert view is not None
+        self._render_snapshot(view, f"（上一次运行 {view['taken_at']} 的结果）")
+        self._showing_last = True
+        self._update_last_button()
+        where = view["outdir"] or "（未记录输出目录）"
+        self.var_status.set(f"正在显示上一次运行（{view['taken_at']}）的结果：{where}")
 
     @staticmethod
     def _set_text(widget: tk.Text, value: str) -> None:
@@ -1630,12 +1844,27 @@ class NanoampApp(ttk.Frame):
         transcripts were annotated or skipped), not how many rows
         annotation.tsv happens to have: a run that annotated one transcript of
         eight must not look like a complete success.
+
+        What this run produced is decided by ``qc.tsv``, never by which files
+        happen to exist: R does not delete ``annotation.tsv`` when a later run
+        does not annotate, so reading the file on sight made the two annotation
+        tabs show the previous run's consequences - with empty counts, because
+        the current run's qc.tsv has no annotation metrics. Those leftovers are
+        reported instead of displayed.
         """
         ann_path = outdir / "annotation.tsv"
         detail_path = outdir / "variants_annotation.tsv"
         for tree in (self.annot_tree, self.var_annot_tree):
             for item in tree.get_children():
                 tree.delete(item)
+        # Every path out of this method must leave the loaded rows consistent
+        # with the (now empty) tables: the protein view and the haplotype filter
+        # read these, so keeping the previous run's rows would let them describe
+        # results that are no longer on screen.
+        self.annotation_records = []
+        self.variant_records = []
+        self._annot_displayed = {}
+        self.annot_filter = None
 
         qc = {}
         qc_path = outdir / "qc.tsv"
@@ -1647,9 +1876,25 @@ class NanoampApp(ttk.Frame):
 
         requested = qc.get("annotation_enabled", "").upper() == "TRUE"
         available = qc.get("annotation_available", "").upper() == "TRUE"
-        if not requested and not ann_path.is_file():
-            self.annot_status.set("未运行功能注释。")
+
+        if not qc_path.is_file():
+            # No record of any run: the annotation files are all there is to go
+            # by, so they are shown (this is the "handed a directory" case).
+            if not ann_path.is_file():
+                self.annot_status.set("未运行功能注释。")
+                self.var_annot_status.set("需要勾选「输出变异级明细」并在分析完成后查看。")
+                return
+        elif not requested:
+            leftovers = [p.name for p in (ann_path, detail_path) if p.is_file()]
+            if leftovers:
+                message = ("本次未运行功能注释"
+                           f"（输出目录里还有上一次运行留下的 {'、'.join(leftovers)}，未显示；"
+                           "点「查看上次结果」可看上次内容）。")
+            else:
+                message = "本次未运行功能注释。"
+            self.annot_status.set(message)
             self.var_annot_status.set("需要勾选「输出变异级明细」并在分析完成后查看。")
+            self._append_log("[GUI] " + message)
             return
 
         if not available and requested:

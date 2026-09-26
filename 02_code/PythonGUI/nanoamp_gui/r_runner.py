@@ -22,7 +22,9 @@ Design notes
 from __future__ import annotations
 
 import os
+import platform
 import shutil
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,28 @@ _CREATE_NO_WINDOW = 0x08000000
 
 class RNotFoundError(RuntimeError):
     """R (Rscript) could not be located."""
+
+
+def _platform_dir() -> str:
+    """The R package's platform tag for this machine (``windows-x86_64``).
+
+    Mirrors ``nanoamp_platform()`` in ``R/utils.R`` so the window looks for the
+    bundled tools in the very directory the analysis uses.
+    """
+    if sys.platform.startswith("win"):
+        os_name = "windows"
+    elif sys.platform == "darwin":
+        os_name = "macos"
+    else:
+        os_name = "linux"
+    machine = (platform.machine() or "").lower()
+    if "aarch64" in machine or "arm64" in machine:
+        arch = "arm64"
+    elif machine in ("x86_64", "amd64", "x64"):
+        arch = "x86_64"
+    else:
+        arch = machine or "x86_64"
+    return f"{os_name}-{arch}"
 
 
 @dataclass
@@ -237,6 +261,65 @@ class NanoampRunner:
         # The R process currently running, so the GUI can cancel it.
         self._proc = None
 
+    def _dependence_aligner(self) -> Path | None:
+        """``<03_dependence>/<platform>/bin/minimap2.exe``, as R would find it.
+
+        R walks up from its working directory (the repo root, for the window)
+        looking for ``03_dependence``, so a checkout finds the binary that ships
+        with the repository. Without this the window would report "no minimap2"
+        on a developer machine where the analysis in fact works.
+        """
+        roots: list[Path] = []
+        env = os.environ.get("NANOAMP_DEPENDENCE_DIR")
+        if env:
+            roots.append(Path(env))
+        candidate = self.repo_root
+        for _ in range(8):
+            roots.append(candidate / "03_dependence")
+            if candidate.parent == candidate:
+                break
+            candidate = candidate.parent
+        for root in roots:
+            exe = root / _platform_dir() / "bin" / "minimap2.exe"
+            if exe.is_file():
+                return exe
+        return None
+
+    def minimap2_path(self) -> Path | None:
+        """The aligner this install should use, or None if there is none.
+
+        The install's own ``<install>\\bin\\minimap2.exe`` is what install.exe
+        copies there, and it is the copy that must win: a machine that did not
+        add nanoamp to PATH has no other way to find an aligner, and an already
+        running Explorer never picked up a freshly added PATH entry. The
+        recorded install ``home`` is consulted separately from ``repo_root``
+        because the two differ whenever the window could not locate the
+        installation (see app.find_repo_root) - losing the aligner in exactly
+        that case is what made "install without the PATH option" fail.
+
+        Then comes the repository's own copy (a checkout), and PATH last, so the
+        window's answer agrees with what R would have found on its own instead
+        of contradicting it.
+        """
+        explicit = os.environ.get("NANOAMP_MINIMAP2")
+        if explicit and Path(explicit).is_file():
+            return Path(explicit)
+
+        candidates = [self.repo_root / "bin" / "minimap2.exe"]
+        home = _configured_paths().get("home")
+        if home is not None:
+            candidates.append(home / "bin" / "minimap2.exe")
+        for cand in candidates:
+            if cand.is_file():
+                return cand
+
+        bundled = self._dependence_aligner()
+        if bundled is not None:
+            return bundled
+
+        which = shutil.which("minimap2")
+        return Path(which) if which else None
+
     # -- environment --------------------------------------------------------
     def wrapper_path(self) -> Path:
         """Path of the generated R wrapper inside the repository."""
@@ -265,8 +348,8 @@ class NanoampRunner:
         # this the R package falls back to searching PATH, which an already
         # running Explorer may not have refreshed after the install, and the
         # analysis then fails with "External tool 'minimap2' not found".
-        minimap2 = self.repo_root / "bin" / "minimap2.exe"
-        if minimap2.is_file():
+        minimap2 = self.minimap2_path()
+        if minimap2 is not None:
             env["NANOAMP_MINIMAP2"] = str(minimap2)
         return env
 

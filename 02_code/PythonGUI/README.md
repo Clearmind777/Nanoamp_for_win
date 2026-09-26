@@ -61,6 +61,8 @@ python 02_code\PythonGUI\run_gui.py
   （`离线 CDS（不联网）` / `在线 genome（需联网，用 Ensembl）` / `自定义 JSON…`）、
   CDS 起/止/链/读码框、输出变异级明细、输出蛋白序列、转录本下拉框与「列出转录本」按钮，
   以及缓存一行（目录/文件数/占用 + 刷新 + 清空缓存 + 测试 Ensembl 连接）。
+  选好目的序列后，「止」会**按该序列长度预填**并明确标注是预填值（可改；改了以后
+  窗口不再覆盖它），长度不是 3 的倍数时仍然按原样拒绝运行并说明原因。
 - **高级参数…**（可选开关）：比对方式（minimap2 / r）、线程、最小支持 reads、
   最小频率、最小一致度、最小覆盖、聚类一致度、最小簇 reads、簇共识、是否保留 BAM。
   **只有改动过的值才会传给命令行**，与不勾选完全等价；「恢复默认值」一键复位。
@@ -70,8 +72,14 @@ python 02_code\PythonGUI\run_gui.py
   点「显示全部」恢复；选中注释行会选中对应的单倍型，并可「查看蛋白序列…」
   （或双击）打开可滚动、可复制的蛋白窗口。
 - **环境自检**：执行 `nanoamp doctor`（含 curl / 缓存目录 / 配置目录 / 注释可用性）。
-- **复制诊断信息**：把运行日志整段复制到剪贴板。
+- **复制诊断信息**：把运行日志整段复制到剪贴板（含窗口根目录、Rscript 与 minimap2 的实际路径）。
 - **打开输出目录**：在资源管理器中打开结果目录。
+- **查看上次结果**：点「开始分析」后**每个结果页都会清空**，上一次运行的内容留在内存里
+  （只在本次程序运行期间有效），需要时点这个按钮切回去看，按钮会变成「返回本次结果」。
+  运行日志**不清空**，它是本次会话的历史。
+  注释两页只显示**本次运行**产生的内容：R 不会删除上一次的 `annotation.tsv`，因此
+  本次没开注释时，窗口会说明"输出目录里还有上一次留下的文件，未显示"，而不是把旧结果
+  连同空的计数（"已注释 个转录本…"）当成新结果画出来。
 
 窗口标题与窗口内的主标题都是 `nanoamp`。
 
@@ -109,6 +117,24 @@ exe 仅打包界面，不含 R，因此体积明显小于完整绿色版（10 MB
 
 上述位置均未命中时，窗口弹出提示，不会静默失败。
 
+### 安装目录与比对程序的定位顺序
+
+窗口的工作目录（`find_repo_root`）用**和 R 定位同一套解析器**：`NANOAMP_HOME` →
+`%LOCALAPPDATA%\nanoamp.path` 指向的安装目录（安装时选了非默认位置才写）→
+默认的 `%LOCALAPPDATA%\nanoamp\config.ini` → 从 exe 所在目录向上找仓库标记。
+
+比对程序（`NanoampRunner.minimap2_path`）的顺序：
+
+1. `<工作目录>\bin\minimap2.exe`（安装器一定会复制到这里，与是否勾选"加入 PATH"无关）
+2. `config.ini` 记录的安装目录下的 `bin\minimap2.exe`
+3. `PATH` 里的 `minimap2`
+
+第 1、2 步命中时会通过 `NANOAMP_MINIMAP2` 显式传给 R，不依赖 PATH：这正是
+"安装时不勾选加入 PATH，窗口就找不到 minimap2"这条报告的修法 —— 旧版
+`find_repo_root` 只认默认安装位置，非默认安装时工作目录退化成 exe 所在目录，
+于是这个环境变量没有被设置，R 只能去 PATH 里找。窗口启动时会把
+`仓库根目录 / Rscript / minimap2` 三行写进运行日志，便于一眼看出用的哪一个。
+
 ## 重新打包 exe
 
 ```powershell
@@ -126,10 +152,10 @@ python 02_code\PythonGUI\build_exe.py
 
 ```powershell
 python 02_code\PythonGUI\tests\test_headless.py            # 路径解析、R 定位、doctor、解析器
-python 02_code\PythonGUI\tests\test_bundled_r_lookup.py    # 只用安装目录里的自带 R 也能启动
+python 02_code\PythonGUI\tests\test_bundled_r_lookup.py    # 自带 R 也能启动 + 非默认安装时的 minimap2 定位
 python 02_code\PythonGUI\tests\test_e2e.py                 # 真实跑一次分析并校验结果解析
 python 02_code\PythonGUI\tests\test_frozen.py              # 打包产物的路径解析与启动
-python 02_code\PythonGUI\tests\test_annotation_gui.py      # 注释面板、高级参数、缓存行、联动、窗口尺寸
+python 02_code\PythonGUI\tests\test_annotation_gui.py      # 注释面板、旧结果/缓存、CDS 预填、高级参数、联动、窗口尺寸
 python 02_code\PythonGUI\tests\test_cancel_analysis.py     # 取消分析
 python 02_code\PythonGUI\tests\test_failure_reporting.py   # 失败分类与 GUI 提示
 python 02_code\PythonGUI\tests\screenshot.py out.png       # 截图（人工查看用）
