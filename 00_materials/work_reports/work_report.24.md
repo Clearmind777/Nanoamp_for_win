@@ -87,11 +87,33 @@ C：必须保留），**只回答不执行**。确认后只执行 A 类：
 | 提交内容 | 推送后远程 blob 与源文件 `hash-object` 完全一致：`README.md` `914fa605…`、`README-CN.md` `f49bbed1…` |
 | R 侧测试 | **本轮未复跑**（R 环境丢失，见 §2）——本次仅改文档，不涉及 R 代码 |
 
+### 4.1 全树一致性检查（补做）：发现 2 个从未提交的文件
+
+顺手写了一个全树比对脚本 `tmp/check_tree_parity.py`：把源目录里每个受版本控制的文件
+按 `.gitattributes` 的换行策略（**索引一律存 LF**，`eol=crlf` 只影响检出）规范化后
+与 `HEAD` 的 blob 逐一比对。第一次比对报了 124 处"字节不同"，逐类看清楚后：
+
+- 122 处是**换行差异**（源文件 CRLF、索引 LF），属策略内的正常现象；
+- **2 处是真实的内容差异**——这两个文件在本机早已改好、却一直没有提交：
+
+| 文件 | 磁盘上的内容 | `HEAD` 里落后的内容 |
+|---|---|---|
+| `02_code/r/inst/configs/README.md` | `01_data/<数据集>/<样本>/variants.N.xlsx` + 该样本的 `meta.tsv` | 重组前的 `01_data/test_data/**/variants.*.xlsx` |
+| `02_code/r/inst/configs/example_cds.json` | `amplicon_reference` = `01_data/TSM20260826/E4-3/reference.self.fa` | 旧的 `01_data/test_data/TSM20260826-020-01254/E4-3_…seq` |
+
+两者**都已在** `release/01_R-package/nanoamp_0.1.0.tar.gz` 里（4490 B / 757 B），
+即用户拿到的包本来是对的、只有仓库历史落后，因此**不影响任何发布资产与校验值**。
+已用 `d594b97` 补交（按指示只做本地提交、未推送）。补交后重跑脚本：
+规范化后差异 **0**；仅剩 1 个未跟踪的运行残留 `release/nanoamp_install.log`
+与 `tmp/` 下被脚本有意跳过的 1 个文件。
+
 ## 5. 提交与推送
 
 - `61d14b0` `docs(readme): document the input-file contract in the root README`
-  （`README.md` + `README-CN.md`）；
-- 提交后 `git ls-remote origin main` == 本地 `HEAD` == `61d14b0`，远程已同步。
+  （`README.md` + `README-CN.md`）；`f5f88b1` 为本工作报告本身；两者提交后
+  `git ls-remote origin main` 与本地 `HEAD` 一致，远程已同步。
+- 之后改为**只本地提交、不推送**：`d594b97`（上表两个文件）留在本地
+  `tmp/push_clone` 的 `main` 上，远程仍停在 `f5f88b1`，需要时说一声即可推送。
 
 ## 6. 仍未做
 
