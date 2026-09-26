@@ -1,11 +1,20 @@
 """Headless checks for the GUI's non-window logic."""
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # 02_code/PythonGUI, which contains nanoamp_gui/
+
+# find_repo_root() and find_rscript() deliberately prefer an *installed* nanoamp,
+# so a leftover %LOCALAPPDATA%\nanoamp.path - which any sandbox install leaves
+# behind - would make this check describe that install instead of this checkout.
+# Isolate the process environment so the result depends on the repository only.
+os.environ["LOCALAPPDATA"] = tempfile.mkdtemp(prefix="nanoamp_headless_local_")
+os.environ.pop("NANOAMP_HOME", None)
 
 from nanoamp_gui.app import find_repo_root, resource_base, NanoampApp  # noqa: E402
 from nanoamp_gui.r_runner import NanoampRunner  # noqa: E402

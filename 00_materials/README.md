@@ -47,8 +47,11 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.25.md      # GUI: stale annotation files, page refresh with an
     |                          #   in-memory previous run, minimap2 without PATH,
     |                          #   CDS end default
-    `-- work_report.26.md      # .gitignore check, rebuilt release assets, and the
-                               #   installed-tree end-to-end verification
+    |-- work_report.26.md      # .gitignore check, rebuilt release assets, and the
+    |                          #   installed-tree end-to-end verification
+    `-- work_report.27.md      # seven GUI improvements (analysis name, resizable
+                               #   panes, scrollbars, sizes, QC glossary, hints,
+                               #   protein view / freeze fix)
 ```
 
 The original request and the requested deliverables are documented in

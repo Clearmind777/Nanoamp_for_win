@@ -123,6 +123,10 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
           修掉三处 GUI 问题：关掉注释后不再显示上一次的 annotation.tsv、
           点「开始分析」清空结果页且可用「查看上次结果」回看、
           不勾选 PATH 时也能找到 minimap2（另：CDS「止」按目的序列长度预填）
+          又一轮 GUI 改进：修掉"请先在「注释结果」里选一行"的误报（点了一行后
+          按钮/双击会弹出模态提示框、窗口看起来像卡死）、新增分析名称、
+          变异注释页说明缺哪一步、单倍型页可拖动分隔线、每页水平滚动条、
+          输出文件按 KB/MB/GB 显示、QC 指标说明
           离线依赖包未变（sha256 2db72289…，重建结果逐字节一致）
           sha256 见 release/_build/SHA256SUMS.txt（这个文件不进资产，所以资产自身的
           校验值写在那里，不会因为改本文件而失效）

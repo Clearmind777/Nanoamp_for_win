@@ -110,6 +110,72 @@ ERROR_CLASS_FALLBACK = (
     "详见「运行日志」；输出目录里的 run_manifest.json 记录了失败原因。"
 )
 
+# The QC glossary shown on the right of the QC page. Every metric name here is
+# one that qc.tsv can actually contain (R/correct.R, R/cluster.R, R/exact.R and
+# R/annotate.R build the table), grouped by which mode produces it, and the
+# wording matches the README's 结果解读 section.
+QC_METRIC_HELP = """\
+指标说明（qc.tsv 的每一行；模式不同，出现的指标也不同）
+
+【三种模式都有】
+mode —— 分析模式：A 参考引导 / B 从头聚类 / C 精确匹配。
+reference_label —— 目的序列的名称（FASTA 头，或样本表里的 ref_label）。
+reference_length —— 目的序列长度（bp）。
+aligner —— 比对后端：minimap2（默认，需内置比对程序）或 r（纯 R 比对）。
+pairwise_provider —— 纯 R 比对时提供 pairwiseAlignment() 的包（pwalign / Biostrings）。
+n_reads_total —— FASTQ 中的总 reads 数。低于 100 条时比例不可靠。
+n_reads_primary —— 作为主比对（primary）的 reads 数（已排除次要比对）。
+n_reads_used —— 通过覆盖度与一致度过滤、真正参与统计的 reads 数。
+mapping_rate —— 比对成功率 = n_reads_primary / n_reads_total，正常应 > 0.95。
+mean_identity —— 参与统计的 reads 与目的序列的平均一致度，正常应 > 0.98。
+mean_coverage —— 平均覆盖倍数 = 所有 reads 覆盖参考的总长 / 参考长度。
+n_raw_variants —— 候选变异位点数（过滤前）。
+n_pass_variants —— 通过过滤、进入单倍型的变异数。
+n_haplotypes —— 单倍型数量。
+top1_proportion —— 第一条单倍型的占比。
+top1_is_reference —— 第一条单倍型是否与目的序列完全一致（TRUE / FALSE）。
+exact_reference_proportion —— 「校正后」与目的序列完全一致的 reads 占比；
+  注意它与模式 C 的 exact_any_proportion（未校正）含义不同，不可混用。
+
+【模式 B（从头聚类）专属】
+identity_cutoff —— 聚类使用的 identity 阈值。
+clustering_method —— DECIPHER 的聚类方法（Clusterize）。
+clustering_seed —— 聚类随机种子。记录下来是为了让同一次 Mode B 结果可复现。
+clustering_note —— DECIPHER 关于距离计算的说明（例如 reads 长度不一致），空为正常。
+consensus_method —— 簇共识序列算法：decipher 或 medoid。
+decipher_version —— DECIPHER 包版本。
+n_clusters —— 聚类得到的簇数。
+n_clusters_passed —— 通过支持度/频率过滤的簇数。
+
+【模式 C（精确匹配）专属】
+n_exact_forward / n_exact_reverse / n_exact_either —— 与参考完全一致（正向 /
+  反向 / 任一方向）的 reads 数。
+exact_any_proportion —— 原始 read 一位不差的比例。这是「测序错误率」而不是实验结果
+  （E4-3 约 9.4%，多数样本在 2%–20%），不要与校正后的
+  exact_reference_proportion 混用。
+n_contains_reference / contains_reference_proportion —— 序列中包含完整参考的
+  reads 数 / 比例。
+n_unique_raw_sequences —— 去重后的原始序列种类数。
+
+【功能注释（勾选「功能注释…」并成功运行后才有）】
+annotation_enabled —— 本次是否请求了功能注释（TRUE / FALSE）。
+annotation_available —— 注释是否真的产出了结果。
+annotation_name —— 注释配置里的 name 字段。
+annotation_route —— 注释路线：cds（离线 CDS）/ genome（在线 Ensembl）。
+annotation_source —— 实际使用的配置来源（界面表单 / 随包示例 / 自定义 JSON 路径）。
+ensembl_release —— 在线路线使用的 Ensembl 版本。
+genetic_code —— 翻译使用的遗传密码表（默认 Standard）。
+n_transcripts —— 参与注释的转录本数。
+n_transcripts_annotated / n_transcripts_skipped —— 注释成功 / 被跳过的转录本数。
+annotation_skip_reason —— 被跳过的原因（例如 CDS 长度不是 3 的倍数）。
+n_haplotypes_annotated / n_haplotypes_skipped —— 至少一条转录本注释成功 /
+  注释失败的单倍型数。
+n_frameshift / n_stop_gained / n_stop_lost / n_start_lost / n_missense /
+n_synonymous / n_inframe —— 各类后果的计数（移码、提前终止、终止丢失、起始丢失、
+  错义、同义、整码插入缺失）。
+n_transcript_conflicts —— 在多个转录本上后果不一致的单倍型数。
+"""
+
 
 def resource_base() -> Path:
     """Directory to resolve repository-relative paths against.
@@ -163,6 +229,24 @@ def find_repo_root(start: Path) -> Path:
     return start.resolve()
 
 
+def _add_scrollbars(parent: tk.Misc, widget, row: int, column: int) -> None:
+    """Put a vertical and a horizontal scrollbar around a Treeview/Text.
+
+    Both kinds accept the same ``*scrollcommand`` options, so one helper covers
+    every page. The tables keep their natural column widths (only the last
+    column stretches), which is what makes the horizontal scrollbar useful: a
+    narrow window scrolls the table instead of squeezing every column.
+    """
+    widget.grid(row=row, column=column, sticky="nsew")
+    ysb = ttk.Scrollbar(parent, orient="vertical", command=widget.yview)
+    ysb.grid(row=row, column=column + 1, sticky="ns")
+    xsb = ttk.Scrollbar(parent, orient="horizontal", command=widget.xview)
+    xsb.grid(row=row + 1, column=column, sticky="ew")
+    widget.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+    parent.rowconfigure(row, weight=1)
+    parent.columnconfigure(column, weight=1)
+
+
 def latest_outdir(repo_root: Path) -> Path:
     """Pick a sensible default output directory.
 
@@ -209,6 +293,14 @@ class NanoampApp(ttk.Frame):
         self.var_mode = tk.StringVar(value="A")
         self.var_topn = tk.IntVar(value=20)
         self.var_status = tk.StringVar(value="就绪。")
+        # Optional name for one run. Empty means "use the start time", which is
+        # what makes two runs distinguishable in 查看上次结果. `analysis_name` is
+        # the run being started/finished; `_displayed_name` is the run whose
+        # results are on screen right now (they differ while a new run is being
+        # prepared, which is exactly when the previous view gets cached).
+        self.var_name = tk.StringVar()
+        self.analysis_name = ""
+        self._displayed_name = ""
 
         # functional annotation state (see _build_annotation_group)
         self.var_annot_on = tk.BooleanVar(value=False)
@@ -252,6 +344,22 @@ class NanoampApp(ttk.Frame):
         self.variant_records: list[dict[str, str]] = []
         self.annot_filter: str | None = None
         self._annot_displayed: dict[str, dict[str, str]] = {}
+        # Row of the annotation table that was last clicked/double-clicked. The
+        # protein view needs it because the haplotype link re-renders the table
+        # (which used to clear the selection and make the button claim that
+        # nothing was selected). See _open_protein_view.
+        self._protein_iid: str | None = None
+        # True while the window is changing a selection itself. The two linked
+        # tables both react to <<TreeviewSelect>>, so a programmatic selection
+        # must not be allowed to bounce between them (see _select_haplotype_row).
+        self._syncing_selection = False
+        # True once a run's own annotation status has been written; the live hint
+        # in the 变异注释 page must not overwrite it (see _update_variant_hint).
+        self._annot_status_from_run = False
+        self._running = False
+
+        # QC page: the metric glossary on the right, toggled by its checkbox.
+        self.var_qc_help = tk.BooleanVar(value=False)
 
         # Every result page is cleared when a new analysis starts. What was on
         # screen before is kept here, in memory only, until the window closes:
@@ -303,8 +411,19 @@ class NanoampApp(ttk.Frame):
         self.entry_ref = row(1, "目的序列 (FASTA)", self.var_reference, self._pick_reference)
         row(2, "输出目录", self.var_outdir, self._pick_outdir)
 
+        # Optional run name, on the 输出目录 row so it costs no extra height (the
+        # window's vertical budget is what the result tables live in). It is not
+        # sent to R: it only labels the run in the window (status line, log,
+        # 查看上次结果).
+        ttk.Label(form, text="分析名称").grid(row=2, column=3, sticky="w",
+                                            padx=(14, 6), pady=3)
+        self.entry_name = ttk.Entry(form, textvariable=self.var_name, width=22)
+        self.entry_name.grid(row=2, column=4, sticky="w", pady=3)
+        ttk.Label(form, text="可留空（默认用开始时间）", foreground="#777777").grid(
+            row=2, column=5, sticky="w", padx=(6, 0))
+
         opts = ttk.Frame(form)
-        opts.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        opts.grid(row=4, column=0, columnspan=6, sticky="w", pady=(6, 0))
         ttk.Label(opts, text="模式").pack(side="left")
         mode_box = ttk.Combobox(
             opts, state="readonly", width=22,
@@ -354,6 +473,8 @@ class NanoampApp(ttk.Frame):
         self._build_qc_tab(nb)
         self._build_files_tab(nb)
         self._build_log_tab(nb)
+        # The tabs exist now, so the 变异注释 hint can describe the real state.
+        self._update_variant_hint()
 
         # -- actions
         actions = ttk.Frame(self)
@@ -656,7 +777,7 @@ class NanoampApp(ttk.Frame):
 
         for var in (self.var_cds_start, self.var_cds_end, self.var_cds_strand,
                     self.var_cds_frame, self.var_annot_source, self.var_annot_on,
-                    self.var_reference):
+                    self.var_annot_detail, self.var_reference):
             var.trace_add("write", lambda *_: self._sync_annotation_state())
         self._sync_annotation_state()
 
@@ -671,6 +792,9 @@ class NanoampApp(ttk.Frame):
         on = bool(self.var_annot_on.get())
         source = self.var_annot_source.get()
         offline = source == ANNOTATION_OFFLINE
+        # The 变异注释 page explains which prerequisite is missing (it depends
+        # only on these two switches, not on the route).
+        self._update_variant_hint()
 
         # See _sync_advanced_state: this container stacks its panels with pack.
         for widget in self._annot_hidden:
@@ -768,6 +892,30 @@ class NanoampApp(ttk.Frame):
             return int(str(text).strip())
         except (TypeError, ValueError):
             return None
+
+    def _update_variant_hint(self) -> None:
+        """Tell the 变异注释 page what it is still missing.
+
+        Its two prerequisites are both form state, so the page can say which one
+        is absent instead of repeating a fixed sentence - and the 输出变异级明细
+        box only exists behind 「功能注释…」, which is exactly what the old text
+        failed to mention. A run's own status is never overwritten.
+        """
+        if self._annot_status_from_run or self._running:
+            return
+        if not hasattr(self, "var_annot_status"):
+            return                      # the tab is built after the panel
+        if not self.var_annot_on.get():
+            self.var_annot_status.set(
+                "本页没有内容：功能注释没有打开。先勾选输入区的「功能注释…」，"
+                "再勾选其中的「输出变异级明细」，然后点「开始分析」。")
+        elif not self.var_annot_detail.get():
+            self.var_annot_status.set(
+                "本页没有内容：已打开功能注释，但「输出变异级明细」没有勾选"
+                "（命令行等价开关是 --annotation-detail）。勾选后点「开始分析」。")
+        else:
+            self.var_annot_status.set(
+                "本页会显示每个变异的后果。设置已就绪，点「开始分析」后在此查看。")
 
     def _reference_length(self) -> int | None:
         """Length of the first sequence in 目的序列, or None if unknown.
@@ -919,6 +1067,17 @@ class NanoampApp(ttk.Frame):
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
+        # The table and the sequence view share one vertical sash the user can
+        # drag: the sequences are sometimes the interesting part and sometimes
+        # just a confirmation, so how much room each gets is the user's call.
+        panes = ttk.Panedwindow(frame, orient="vertical")
+        panes.grid(row=0, column=0, sticky="nsew")
+        self.haplotype_panes = panes
+
+        table = ttk.Frame(panes, padding=0)
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
+
         cols = ("rank", "haplotype_id", "count", "proportion", "is_reference",
                 "n_snv", "n_ins", "n_del", "length", "variants")
         heads = {
@@ -931,36 +1090,69 @@ class NanoampApp(ttk.Frame):
                   "is_reference": 130, "n_snv": 50, "n_ins": 50, "n_del": 50,
                   "length": 60, "variants": 260}
 
-        self.tree = ttk.Treeview(frame, columns=cols, show="headings", height=12)
+        self.tree = ttk.Treeview(table, columns=cols, show="headings", height=12)
         for c in cols:
             self.tree.heading(c, text=heads[c])
-            self.tree.column(c, width=widths[c], anchor="w" if c == "variants" else "center")
+            self.tree.column(c, width=widths[c], stretch=(c == "variants"),
+                             anchor="w" if c == "variants" else "center")
         self.tree.grid(row=0, column=0, sticky="nsew")
+        _add_scrollbars(table, self.tree, row=0, column=0)
+        panes.add(table, weight=3)
 
-        yscroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        yscroll.grid(row=0, column=1, sticky="ns")
-        self.tree.configure(yscrollcommand=yscroll.set)
+        seq_pane = ttk.Frame(panes, padding=0)
+        seq_pane.columnconfigure(0, weight=1)
+        seq_pane.rowconfigure(0, weight=1)
+        self.seq_box = tk.Text(seq_pane, height=5, wrap="char", font=("Consolas", 9))
+        self.seq_box.grid(row=0, column=0, sticky="nsew")
+        sb = ttk.Scrollbar(seq_pane, orient="vertical", command=self.seq_box.yview)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.seq_box.configure(yscrollcommand=sb.set, state="disabled")
+        ttk.Label(seq_pane, text="选中一行可查看对应单倍型序列；两栏之间的分隔线可上下拖动。",
+                  foreground="#777777").grid(row=1, column=0, columnspan=2, sticky="w")
+        panes.add(seq_pane, weight=1)
 
-        self.seq_box = tk.Text(frame, height=5, wrap="char", font=("Consolas", 9))
-        self.seq_box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.seq_box.configure(state="disabled")
-        ttk.Label(frame, text="选中一行可查看对应单倍型序列。",
-                  foreground="#777777").grid(row=2, column=0, sticky="w")
         self.tree.bind("<<TreeviewSelect>>", self._on_select_haplotype)
 
     def _build_qc_tab(self, nb: ttk.Notebook) -> None:
         frame = ttk.Frame(nb, padding=4)
         nb.add(frame, text="QC 指标")
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        # The glossary is independent of any analysis: it describes the metrics
+        # whether or not qc.tsv exists yet.
+        ttk.Checkbutton(frame, text="指标说明", variable=self.var_qc_help,
+                        command=self._toggle_qc_help).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
         # A fixed height (in lines) keeps the tab's requested size independent of
         # how many metrics there are: the text scrolls instead of pushing the
         # window taller as QC rows are added.
         self.qc_text = tk.Text(frame, wrap="none", font=("Consolas", 10), height=12)
-        self.qc_text.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=self.qc_text.yview)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.qc_text.configure(yscrollcommand=sb.set, state="disabled")
+        self.qc_text.grid(row=1, column=0, sticky="nsew")
+        _add_scrollbars(frame, self.qc_text, row=1, column=0)
+        self.qc_text.configure(state="disabled")
+
+        # Right-hand glossary, hidden until the box above is ticked.
+        self.qc_help_frame = ttk.Frame(frame)
+        self.qc_help_frame.columnconfigure(0, weight=1)
+        self.qc_help_frame.rowconfigure(0, weight=1)
+        self.qc_help_text = tk.Text(self.qc_help_frame, wrap="word", width=52,
+                                    font=("Segoe UI", 9), height=12)
+        self.qc_help_text.grid(row=0, column=0, sticky="nsew")
+        help_sb = ttk.Scrollbar(self.qc_help_frame, orient="vertical",
+                                command=self.qc_help_text.yview)
+        help_sb.grid(row=0, column=1, sticky="ns")
+        self.qc_help_text.configure(yscrollcommand=help_sb.set, state="disabled")
+        self._set_text(self.qc_help_text, QC_METRIC_HELP)
+        self._toggle_qc_help()
+
+    def _toggle_qc_help(self) -> None:
+        """Show/hide the QC metric glossary (independent of any run)."""
+        if self.var_qc_help.get():
+            self.qc_help_frame.grid(row=1, column=2, sticky="nsew", padx=(8, 0))
+        else:
+            self.qc_help_frame.grid_remove()
 
     def _build_files_tab(self, nb: ttk.Notebook) -> None:
         frame = ttk.Frame(nb, padding=4)
@@ -969,13 +1161,11 @@ class NanoampApp(ttk.Frame):
         frame.rowconfigure(0, weight=1)
         self.files_tree = ttk.Treeview(frame, columns=("name", "size"), show="headings")
         self.files_tree.heading("name", text="文件")
-        self.files_tree.heading("size", text="大小 (字节)")
-        self.files_tree.column("name", width=380)
-        self.files_tree.column("size", width=110, anchor="e")
+        self.files_tree.heading("size", text="大小")
+        self.files_tree.column("name", width=380, stretch=True)
+        self.files_tree.column("size", width=110, anchor="e", stretch=False)
         self.files_tree.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=self.files_tree.yview)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.files_tree.configure(yscrollcommand=sb.set)
+        _add_scrollbars(frame, self.files_tree, row=0, column=0)
         self.files_tree.bind("<Double-1>", self._on_open_file)
 
     def _build_log_tab(self, nb: ttk.Notebook) -> None:
@@ -987,9 +1177,8 @@ class NanoampApp(ttk.Frame):
         # window grow as lines arrive.
         self.log_text = tk.Text(frame, wrap="none", font=("Consolas", 9), height=12)
         self.log_text.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=self.log_text.yview)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.log_text.configure(yscrollcommand=sb.set, state="disabled")
+        _add_scrollbars(frame, self.log_text, row=0, column=0)
+        self.log_text.configure(state="disabled")
 
     def _build_annotation_tab(self, nb: ttk.Notebook) -> None:
         """Per-haplotype x per-transcript consequences (annotation.tsv)."""
@@ -1018,20 +1207,19 @@ class NanoampApp(ttk.Frame):
         self.annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=5)
         for c in cols:
             self.annot_tree.heading(c, text=heads[c])
-            self.annot_tree.column(c, width=widths[c],
+            self.annot_tree.column(c, width=widths[c], stretch=(c == "variants"),
                                    anchor="w" if c in ("variants", "transcript_id") else "center")
         self.annot_tree.grid(row=1, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=self.annot_tree.yview)
-        sb.grid(row=1, column=1, sticky="ns")
-        self.annot_tree.configure(yscrollcommand=sb.set)
+        _add_scrollbars(frame, self.annot_tree, row=1, column=0)
         # Selecting a haplotype here highlights the same row in the other tabs.
         self.annot_tree.bind("<<TreeviewSelect>>", self._on_select_annotation)
 
         # Filter + protein view (plan items E7 and G9). Selecting a haplotype in
         # the main tab narrows this table to that haplotype; the button restores
         # the full table, and the label always says which of the two is shown.
+        # (Row 2 belongs to the table's horizontal scrollbar.)
         filter_row = ttk.Frame(frame)
-        filter_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        filter_row.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.var_annot_filter = tk.StringVar(value="")
         ttk.Label(filter_row, textvariable=self.var_annot_filter,
                   foreground="#555555").pack(side="left")
@@ -1046,8 +1234,10 @@ class NanoampApp(ttk.Frame):
         self.btn_annot_protein.pack(side="left", padx=(8, 0))
         ttk.Label(frame,
                   text="双击一行或点「查看蛋白序列…」（需要勾选「输出蛋白序列」重跑）。",
-                  foreground="#777777").grid(row=3, column=0, columnspan=2, sticky="w")
-        self.annot_tree.bind("<Double-1>", lambda _e: self._open_protein_view())
+                  foreground="#777777").grid(row=4, column=0, columnspan=2, sticky="w")
+        # Double-click must use the row under the cursor: by the time it fires,
+        # the haplotype link may have re-rendered this table.
+        self.annot_tree.bind("<Double-1>", self._on_annot_double_click)
 
     def _build_variant_annotation_tab(self, nb: ttk.Notebook) -> None:
         """Per-variant consequences (variants_annotation.tsv)."""
@@ -1057,7 +1247,7 @@ class NanoampApp(ttk.Frame):
         frame.rowconfigure(1, weight=1)
 
         self.var_annot_status = tk.StringVar(
-            value="需要勾选「输出变异级明细」并在分析完成后查看。")
+            value="本页需要「功能注释…」和「输出变异级明细」都在勾选状态，并在分析完成后查看。")
         ttk.Label(frame, textvariable=self.var_annot_status, foreground="#666666",
                   wraplength=WINDOW_WIDTH - 90, justify="left").grid(
             row=0, column=0, columnspan=2, sticky="w")
@@ -1073,14 +1263,14 @@ class NanoampApp(ttk.Frame):
         self.var_annot_tree = ttk.Treeview(frame, columns=cols, show="headings", height=5)
         for c in cols:
             self.var_annot_tree.heading(c, text=heads[c])
-            self.var_annot_tree.column(c, width=82, anchor="center")
+            self.var_annot_tree.column(c, width=82, stretch=(c == "consequence_zh"),
+                                       anchor="center")
         self.var_annot_tree.grid(row=1, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(frame, orient="vertical", command=self.var_annot_tree.yview)
-        sb.grid(row=1, column=1, sticky="ns")
-        self.var_annot_tree.configure(yscrollcommand=sb.set)
+        _add_scrollbars(frame, self.var_annot_tree, row=1, column=0)
 
+        # Row 2 is the table's horizontal scrollbar.
         filter_row = ttk.Frame(frame)
-        filter_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        filter_row.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.var_variant_filter = tk.StringVar(value="")
         ttk.Label(filter_row, textvariable=self.var_variant_filter,
                   foreground="#555555").pack(side="left")
@@ -1156,6 +1346,24 @@ class NanoampApp(ttk.Frame):
                 self.var_reference.set(self.normalize_path_text(str(cand)))
                 return
 
+    def _current_analysis_name(self) -> str:
+        """The name for the run that is about to start.
+
+        What the user typed, or the start time - a run always has a label, which
+        is what makes 查看上次结果 tell the two runs apart.
+        """
+        return (self.var_name.get().strip()
+                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    def _name_suffix(self) -> str:
+        """The run name, appended to the status line.
+
+        Appended, not prefixed: the status line still *starts* with the outcome
+        (分析完成/分析失败/分析已取消), which is what users and scripts read it
+        for.
+        """
+        return f"｜分析名称：{self.analysis_name}" if self.analysis_name else ""
+
     def _on_run(self) -> None:
         if self.worker and self.worker.is_alive():
             return
@@ -1210,11 +1418,15 @@ class NanoampApp(ttk.Frame):
                 argv.append("--annotation-detail")
             if self.var_annot_proteins.get():
                 argv.append("--annotation-proteins")
+        # The run name: what the user typed, or the start time. It labels the run
+        # in the window only (status line, log, 查看上次结果) and is not sent to R.
+        self.analysis_name = self._current_analysis_name()
         self._keep_previous_results()
         self._clear_results()
         self._cancel_requested = False
         self._set_running(True)
         self._append_log("")
+        self._append_log(f"[GUI] 分析名称：{self.analysis_name}")
         self._append_log("$ nanoamp " + " ".join(argv))
 
         self.worker = threading.Thread(
@@ -1511,6 +1723,7 @@ class NanoampApp(ttk.Frame):
     # -------------------------------------------------------------- state
     def _set_running(self, running: bool) -> None:
         state = "disabled" if running else "normal"
+        self._running = running
         self.btn_run.configure(state=state)
         self.btn_doctor.configure(state=state)
         # Cancel is the mirror image: available exactly while R is running.
@@ -1559,7 +1772,8 @@ class NanoampApp(ttk.Frame):
             # completed run later on.
             self._cancel_requested = False
             self._mark_cancelled(outdir)
-            self.var_status.set(f"分析已取消。部分结果保留在：{outdir}")
+            self.var_status.set(
+                f"分析已取消。部分结果保留在：{outdir}{self._name_suffix()}")
             if outdir.is_dir():
                 self.btn_open.configure(state="normal")
             self._remember_current_view()
@@ -1576,7 +1790,8 @@ class NanoampApp(ttk.Frame):
         self.btn_open.configure(state="normal")
         self._load_results(outdir)
         n = len(self.tree.get_children())
-        self.var_status.set(f"分析完成，输出目录：{outdir}（{n} 条单倍型）")
+        self.var_status.set(
+            f"分析完成，输出目录：{outdir}（{n} 条单倍型）{self._name_suffix()}")
         self._remember_current_view()
 
     # ------------------------------------------------------------ results
@@ -1608,7 +1823,12 @@ class NanoampApp(ttk.Frame):
         self.variant_records = []
         self._annot_displayed = {}
         self.annot_filter = None
+        self._protein_iid = None
+        self._annot_status_from_run = False
         self._showing_last = False
+        # The pages now belong to the run that is starting, and it is the name
+        # captured earlier (with the previous view) that must stay in the cache.
+        self._displayed_name = self.analysis_name
         self._update_last_button()
 
     # -- keeping the previous run's pages -----------------------------------
@@ -1620,6 +1840,7 @@ class NanoampApp(ttk.Frame):
     def _page_snapshot(self) -> dict:
         """Everything the result pages currently show, as plain data."""
         return {
+            "name": self._displayed_name,
             "taken_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "outdir": str(self.last_outdir or ""),
             "tree": self._tree_rows(self.tree),
@@ -1641,6 +1862,12 @@ class NanoampApp(ttk.Frame):
         return bool(view["tree"] or view["files"] or view["annotation_records"]
                     or view["variant_records"] or view["qc"].strip())
 
+    @staticmethod
+    def _snapshot_label(view: dict) -> str:
+        """How a cached run is named in the status lines."""
+        name = str(view.get("name") or "").strip() or "未命名"
+        return f"{name} · {view.get('taken_at', '')}"
+
     def _render_snapshot(self, view: dict, suffix: str) -> None:
         """Draw a cached page snapshot, labelled with `suffix` when it is older."""
         for tree, key in ((self.tree, "tree"), (self.files_tree, "files")):
@@ -1661,6 +1888,8 @@ class NanoampApp(ttk.Frame):
         self._set_text(self.seq_box, view["seq"])
         self.fasta_cache = dict(view["fasta_cache"])
         self.last_outdir = Path(view["outdir"]) if view["outdir"] else None
+        self._displayed_name = str(view.get("name") or "")
+        self.analysis_name = self._displayed_name
 
     def _update_last_button(self) -> None:
         has_previous = self._snapshot_has_content(self._last_results)
@@ -1685,6 +1914,7 @@ class NanoampApp(ttk.Frame):
 
     def _remember_current_view(self) -> None:
         """Remember what this run produced, so the toggle can come back to it."""
+        self._displayed_name = self.analysis_name
         self._current_view = self._page_snapshot()
         self._showing_last = False
         self._update_last_button()
@@ -1708,11 +1938,12 @@ class NanoampApp(ttk.Frame):
         if not self._snapshot_has_content(view):
             return
         assert view is not None
-        self._render_snapshot(view, f"（上一次运行 {view['taken_at']} 的结果）")
+        self._render_snapshot(view, f"（上一次运行：{self._snapshot_label(view)}）")
         self._showing_last = True
         self._update_last_button()
         where = view["outdir"] or "（未记录输出目录）"
-        self.var_status.set(f"正在显示上一次运行（{view['taken_at']}）的结果：{where}")
+        self.var_status.set(
+            f"正在显示上一次运行：{self._snapshot_label(view)} 的结果：{where}")
 
     @staticmethod
     def _set_text(widget: tk.Text, value: str) -> None:
@@ -1754,9 +1985,11 @@ class NanoampApp(ttk.Frame):
         label = {"input": "输入错误", "environment": "环境问题",
                  "network": "网络问题", "internal": "内部错误"}.get(cls)
         if label:
-            self.var_status.set(f"分析失败（退出码 {code}，{label}）。详见运行日志。")
+            self.var_status.set(
+                f"分析失败（退出码 {code}，{label}）。详见运行日志。{self._name_suffix()}")
         else:
-            self.var_status.set(f"分析失败（退出码 {code}）。详见运行日志。")
+            self.var_status.set(
+                f"分析失败（退出码 {code}）。详见运行日志。{self._name_suffix()}")
         if cls:
             self._append_log(f"[GUI] 失败分类：{cls}")
         if message:
@@ -1854,6 +2087,9 @@ class NanoampApp(ttk.Frame):
         """
         ann_path = outdir / "annotation.tsv"
         detail_path = outdir / "variants_annotation.tsv"
+        # Everything below describes this run, so the live hint must stop
+        # overwriting the 变异注释 status until the next run starts.
+        self._annot_status_from_run = True
         for tree in (self.annot_tree, self.var_annot_tree):
             for item in tree.get_children():
                 tree.delete(item)
@@ -1960,7 +2196,14 @@ class NanoampApp(ttk.Frame):
             self.var_annot_status.set("未请求变异级明细（勾选后重跑即可生成）。")
 
     def _render_annotation_rows(self) -> None:
-        """Draw annotation.tsv rows, honouring the haplotype filter (E7)."""
+        """Draw annotation.tsv rows, honouring the haplotype filter (E7).
+
+        The rows are deleted and re-inserted, which drops the selection; the row
+        that was selected is selected again afterwards when it still exists.
+        Without that, clicking a row made the haplotype link re-render this very
+        table and 「查看蛋白序列…」 then claimed nothing was selected.
+        """
+        keep = self.annot_tree.selection()
         for item in self.annot_tree.get_children():
             self.annot_tree.delete(item)
         self._annot_displayed: dict[str, dict] = {}
@@ -1982,6 +2225,11 @@ class NanoampApp(ttk.Frame):
             )
             self._annot_displayed[iid] = r
             shown += 1
+        if keep and self.annot_tree.exists(keep[0]):
+            self._select_annot_row(keep[0])
+            self._protein_iid = str(keep[0])
+        elif self._protein_iid and not self.annot_tree.exists(self._protein_iid):
+            self._protein_iid = None
         if self.annot_filter:
             self.var_annot_filter.set(
                 f"仅显示 {self.annot_filter}（{shown} / {len(records)} 行）；"
@@ -2054,13 +2302,28 @@ class NanoampApp(ttk.Frame):
                 + f"参考蛋白（{len(ref)} aa）：\n{ref}\n\n"
                 + f"突变蛋白（{len(alt)} aa）：\n{alt}")
 
+    def _protein_row(self) -> str | None:
+        """The annotation row the protein view should show, or None.
+
+        The tree's own selection wins; when it is empty (a re-render, or a click
+        on the scrollbar) the row that was last clicked is used, but only while
+        it is still on screen. That is what stops the button from claiming
+        "nothing selected" right after the user selected a row.
+        """
+        sel = self.annot_tree.selection()
+        if sel and self.annot_tree.exists(str(sel[0])):
+            return str(sel[0])
+        if self._protein_iid and self.annot_tree.exists(self._protein_iid):
+            self._select_annot_row(self._protein_iid)
+            return self._protein_iid
+        return None
+
     def _open_protein_view(self) -> None:
         """Open the protein sequence(s) of the selected row in a window."""
-        sel = self.annot_tree.selection()
-        if not sel:
+        iid = self._protein_row()
+        if iid is None:
             messagebox.showinfo("先选一行", "请先在「注释结果」里选中一行。")
             return
-        iid = str(sel[0])
         text = self._protein_text(iid)
         win = tk.Toplevel(self)
         win.title(f"蛋白序列 - {iid.split('|')[0]}")
@@ -2091,16 +2354,64 @@ class NanoampApp(ttk.Frame):
         # Keep a reference so tests (and the WM) can see the window exists.
         self.protein_window = win
 
+    def _select_annot_row(self, iid: str) -> None:
+        """Select an annotation row without re-entering the link handlers."""
+        if self._syncing_selection:
+            return
+        self._syncing_selection = True
+        try:
+            self.annot_tree.selection_set(iid)
+        finally:
+            self._syncing_selection = False
+
+    def _select_haplotype_row(self, hid: str) -> None:
+        """Select a haplotype row, but only when that changes anything.
+
+        Selecting a row raises <<TreeviewSelect>>, which the haplotype page
+        answers by re-rendering the annotation table - and re-rendering restores
+        the annotation selection, which raises the event again. Doing nothing
+        when the row is already selected (and while a selection is being set
+        programmatically) is what keeps that cycle from spinning forever: in a
+        live window it looked like the program had frozen.
+        """
+        if self._syncing_selection:
+            return
+        if self.tree.selection() == (hid,):
+            return
+        self._syncing_selection = True
+        try:
+            self.tree.selection_set(hid)
+            self.tree.see(hid)
+        finally:
+            self._syncing_selection = False
+
+    def _on_annot_double_click(self, event) -> None:
+        """Open the protein view for the row under the cursor.
+
+        Using the event's own row (instead of the tree's selection) is what makes
+        the double-click reliable: the first click selects the row and, through
+        the haplotype link, re-renders this table - so by the time <Double-1>
+        arrives the selection may already have been rebuilt.
+        """
+        iid = self.annot_tree.identify_row(event.y)
+        if not iid:
+            return "break"
+        self._select_annot_row(iid)
+        self._show_protein(iid)
+        self._open_protein_view()
+        return "break"
+
     def _on_select_annotation(self, _event) -> None:
         """Selecting an annotation row also selects the haplotype elsewhere."""
+        if self._syncing_selection:
+            return
         sel = self.annot_tree.selection()
         if not sel:
             return
         self._show_protein(str(sel[0]))
         hid = str(sel[0]).split("|", 1)[0]
         if hid in self.tree.get_children():
-            self.tree.selection_set(hid)
-            self.tree.see(hid)
+            self._select_haplotype_row(hid)
 
     def _load_haplotypes(self, path: Path) -> None:
         if not path.is_file():
@@ -2147,6 +2458,18 @@ class NanoampApp(ttk.Frame):
         lines = [f"{self._cell(r, 'metric'):<24} {self._cell(r, 'value')}" for r in rows]
         self._set_text(self.qc_text, "\n".join(lines))
 
+    @staticmethod
+    def _human_size(size: int) -> str:
+        """A file size a human can compare at a glance: 1.5 KB / 2.3 MB / 1.1 GB."""
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                if unit == "B":
+                    return f"{int(value)} B"
+                return f"{value:.1f} {unit}" if value < 100 else f"{value:.0f} {unit}"
+            value /= 1024
+        return f"{size} B"
+
     def _load_files(self, outdir: Path) -> None:
         try:
             entries = sorted(p for p in outdir.iterdir() if p.is_file())
@@ -2154,17 +2477,22 @@ class NanoampApp(ttk.Frame):
             self._append_log(f"[GUI] 无法列出输出目录：{exc}")
             return
         for p in entries:
-            self.files_tree.insert("", "end", iid=p.name,
-                                   values=(p.name, f"{p.stat().st_size:,}"))
+            self.files_tree.insert(
+                "", "end", iid=p.name,
+                values=(p.name, self._human_size(p.stat().st_size)))
 
     def _on_select_haplotype(self, _event) -> None:
+        if self._syncing_selection:
+            return
         sel = self.tree.selection()
         if not sel or not self.last_outdir:
             return
         hid = sel[0]
         # E7: picking a haplotype narrows the annotation tabs to that haplotype,
-        # so "what does H3 look like" is one click instead of a search.
-        if getattr(self, "annotation_records", None):
+        # so "what does H3 look like" is one click instead of a search. Only when
+        # the filter actually changes: re-rendering for the same haplotype would
+        # raise the selection events that bounce off _on_select_annotation.
+        if getattr(self, "annotation_records", None) and self.annot_filter != str(hid):
             self._set_annot_filter(str(hid))
         if not self.fasta_cache:
             self.fasta_cache = self._load_fasta(self.last_outdir / "haplotypes.fasta")

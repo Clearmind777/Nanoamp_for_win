@@ -21,6 +21,8 @@ import sys
 import tempfile
 import tkinter as tk
 from pathlib import Path
+from tkinter import ttk
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 GUI = HERE.parent
@@ -651,6 +653,288 @@ check(app.var_cds_end.get() == "", "a missing reference file fills nothing in",
       app.var_cds_end.get())
 app.var_annot_on.set(False)
 app._sync_annotation_state()
+
+print("\n=== 6m) 查看蛋白序列 works right after selecting a row ===")
+# The reported bug: clicking a row made the haplotype link re-render this very
+# table, which dropped the selection - so the button (and double-click) claimed
+# nothing was selected even though the user had just picked a row.
+sel_dir = Path(tempfile.mkdtemp(prefix="nanoamp_gui_protein2_"))
+(sel_dir / "qc.tsv").write_text(
+    "metric\tvalue\nannotation_enabled\tTRUE\nannotation_available\tTRUE\n"
+    "n_transcripts_annotated\t1\nn_transcripts_skipped\t0\n"
+    "n_haplotypes_annotated\t2\nannotation_source\tcds-config\n",
+    encoding="utf-8",
+)
+(sel_dir / "annotation.tsv").write_text(
+    "haplotype_id\ttranscript_id\tconsequence_zh\tconsequence_any_transcript_zh\t"
+    "transcript_conflict\tprotein_change\tvariants\tref_protein\talt_protein\n"
+    "H1\tT1\t无变异\t无变异\tFALSE\tp.(=)\t.\tMKT\tMKT\n"
+    "H2\tT1\t错义\t错义\tFALSE\tp.Lys2Glu\t50G>A\tMKT\tMET\n",
+    encoding="utf-8",
+)
+(sel_dir / "haplotypes.tsv").write_text(
+    "rank\thaplotype_id\tcount\tproportion\tci_low\tci_high\tis_reference\t"
+    "n_snv\tn_ins\tn_del\tlength\tvariants\n"
+    "1\tH1\t100\t0.6\t0.5\t0.7\tTRUE\t0\t0\t0\t300\t.\n"
+    "2\tH2\t60\t0.4\t0.3\t0.5\tFALSE\t1\t0\t0\t300\t50G>A\n",
+    encoding="utf-8",
+)
+(sel_dir / "haplotypes.fasta").write_text(">H1_300\nACGT\n>H2_300\nACGA\n", encoding="utf-8")
+app.last_outdir = sel_dir
+app._clear_results()
+app._load_results(sel_dir)
+check(len(app.annot_tree.get_children()) == 2, "the table has rows to click",
+      f"{len(app.annot_tree.get_children())} rows")
+
+# exactly what a click does: select the row, then the <<TreeviewSelect>> handler
+# links to the haplotype table and re-renders this one
+app.annot_tree.selection_set("H2|T1")
+app._on_select_annotation(None)
+check(app.annot_tree.selection() == ("H2|T1",),
+      "the clicked row stays selected after the link re-rendered the table",
+      str(app.annot_tree.selection()))
+check(app._protein_row() == "H2|T1", "so the protein view knows which row",
+      str(app._protein_row()))
+
+shown: list[str] = []
+original_showinfo = app_module.messagebox.showinfo
+app.protein_window = None
+try:
+    app_module.messagebox.showinfo = lambda title, msg=None, **kw: shown.append(str(title))
+    app._open_protein_view()
+    check(app.protein_window is not None, "「查看蛋白序列…」 opens the window")
+    check(not any("先选一行" in t for t in shown),
+          "and does not ask for a selection", str(shown))
+
+    # even with the tree's own selection cleared, the last clicked row is used
+    app.annot_tree.selection_remove(*app.annot_tree.selection())
+    check(app._protein_row() == "H2|T1",
+          "the last clicked row is remembered while it is on screen")
+    if app.protein_window is not None:
+        app.protein_window.destroy()
+    app.protein_window = None
+    app._open_protein_view()
+    check(app.protein_window is not None, "so the button still opens it")
+
+    # double-click uses the row under the cursor, whatever the selection says
+    if app.protein_window is not None:
+        app.protein_window.destroy()
+    app.protein_window = None
+    app.annot_tree.selection_remove(*app.annot_tree.selection())
+    real_identify = app.annot_tree.identify_row
+    app.annot_tree.identify_row = lambda _y: "H1|T1"      # pretend the cursor is there
+    try:
+        app._on_annot_double_click(SimpleNamespace(y=24))
+    finally:
+        del app.annot_tree.identify_row
+    check(app.annot_tree.selection() == ("H1|T1",),
+          "double-click selects the row under the cursor",
+          str(app.annot_tree.selection()))
+    check(app.protein_window is not None, "and opens its protein window")
+
+    # with nothing loaded the message is still correct
+    if app.protein_window is not None:
+        app.protein_window.destroy()
+    app.protein_window = None
+    app._load_annotation(Path(tempfile.mkdtemp(prefix="nanoamp_gui_empty2_")))
+    app.annot_tree.identify_row = lambda _y: ""
+    shown.clear()
+    check(app._protein_row() is None, "with no rows there is no row to show")
+    app._open_protein_view()
+    check(any("先选一行" in t for t in shown),
+          "and only then does it ask for a selection", str(shown))
+finally:
+    app_module.messagebox.showinfo = original_showinfo
+    if app.protein_window is not None:
+        app.protein_window.destroy()
+        app.protein_window = None
+    if "identify_row" in app.annot_tree.__dict__:
+        del app.annot_tree.identify_row
+    _ = real_identify
+
+# The two linked tables raise <<TreeviewSelect>> at each other through the
+# filter re-render. That only becomes a loop once a real event loop is running,
+# which is why the checks above missed it while the shipped window froze on
+# double-click. Run the cycle here with events being processed and count how
+# often the annotation table is redrawn.
+app.last_outdir = sel_dir
+app._clear_results()
+app._load_results(sel_dir)
+renders = {"n": 0}
+real_render = app._render_annotation_rows
+
+
+def counted_render():
+    renders["n"] += 1
+    if renders["n"] > 30:      # stop the cycle so the check can fail instead of hang
+        return
+    return real_render()
+
+
+app._render_annotation_rows = counted_render
+try:
+    for _ in range(5):
+        root.update()
+    app.annot_tree.selection_set("H2|T1")
+    for _ in range(30):
+        root.update()
+    app._open_protein_view()
+    for _ in range(30):
+        root.update()
+finally:
+    del app._render_annotation_rows
+    if app.protein_window is not None:
+        app.protein_window.destroy()
+        app.protein_window = None
+check(renders["n"] <= 6,
+      "clicking a row and opening the protein view does not loop with a live "
+      "event loop", f"{renders['n']} redraws")
+check(app.annot_tree.selection() == ("H2|T1",),
+      "and the clicked row is still the selected one afterwards",
+      str(app.annot_tree.selection()))
+app._clear_annot_filter()
+
+print("\n=== 6n) 分析名称：typed name, time default, and 上次结果 shows it ===")
+import re  # noqa: E402
+
+app.var_name.set("  样本 A 复测  ")
+check(app._current_analysis_name() == "样本 A 复测",
+      "a typed name is used (trimmed)", app._current_analysis_name())
+app.var_name.set("")
+generated = app._current_analysis_name()
+check(bool(re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", generated)),
+      "an empty name falls back to the start time", generated)
+check(app.entry_name.winfo_manager() in ("grid", "pack"),
+      "the name field is on the input form")
+
+# run 1 named, then a second run: 查看上次结果 must name the run it shows
+app.analysis_name = "第一次（E4-3）"
+app._remember_current_view()
+check((app._current_view or {}).get("name") == "第一次（E4-3）",
+      "the finished run's view carries its name",
+      str((app._current_view or {}).get("name")))
+app.analysis_name = "第二次（E4-3 复测）"
+app._keep_previous_results()
+check(app._last_results is not None and app._last_results["name"] == "第一次（E4-3）",
+      "the cached run keeps its own name, not the new run's",
+      str((app._last_results or {}).get("name")))
+app._clear_results()                      # run 2 starts
+app._remember_current_view()              # ... and finishes
+app._toggle_last_results()
+check("第一次（E4-3）" in app.var_status.get(),
+      "查看上次结果 names the previous run", app.var_status.get()[:70])
+check("第一次（E4-3）" in app.annot_status.get(),
+      "and each cached page is labelled with it too", app.annot_status.get()[:80])
+check(app.analysis_name == "第一次（E4-3）",
+      "the shown run's name becomes the current one", app.analysis_name)
+app._toggle_last_results()
+check(app.analysis_name == "第二次（E4-3 复测）",
+      "coming back restores this run's name", app.analysis_name)
+
+print("\n=== 6o) 变异注释 page says which prerequisite is missing ===")
+app._running = False
+app._annot_status_from_run = False
+app.var_annot_on.set(False)
+app.var_annot_detail.set(True)
+app._sync_annotation_state()
+hint = app.var_annot_status.get()
+check("功能注释" in hint and "输出变异级明细" in hint,
+      "with annotation off it names both switches", hint)
+app.var_annot_on.set(True)
+app.var_annot_detail.set(False)
+app._sync_annotation_state()
+check("没有勾选" in app.var_annot_status.get()
+      and "--annotation-detail" in app.var_annot_status.get(),
+      "with the detail box off it says so and gives the CLI switch",
+      app.var_annot_status.get())
+app.var_annot_detail.set(True)
+app._sync_annotation_state()
+check("设置已就绪" in app.var_annot_status.get(),
+      "with both ticked it says the settings are ready", app.var_annot_status.get())
+check(app.chk_annot_detail.winfo_manager() in ("grid", "pack"),
+      "the detail checkbox lives in the annotation panel (shown with it)")
+
+# a finished run's own status must survive a later toggle
+app._load_annotation(ann_dir)
+run_status = app.var_annot_status.get()
+check(run_status != "" and "设置已就绪" not in run_status,
+      "the run's status replaced the live hint", run_status[:60])
+app.var_annot_detail.set(False)
+app._sync_annotation_state()
+check(app.var_annot_status.get() == run_status,
+      "and the live hint does not overwrite it", app.var_annot_status.get()[:60])
+app.var_annot_detail.set(True)
+
+print("\n=== 6p) draggable haplotype divider and horizontal scrollbars ===")
+check(isinstance(app.haplotype_panes, ttk.Panedwindow),
+      "the haplotype page uses a paned window")
+check(str(app.haplotype_panes.cget("orient")) == "vertical", "with a vertical divider")
+check(len(app.haplotype_panes.panes()) == 2,
+      "holding the table and the sequence view", str(len(app.haplotype_panes.panes())))
+check(str(app.tree.master.master) == str(app.haplotype_panes),
+      "the table is the first pane", str(app.tree.master.master))
+for page, widget in (("单倍型结果", app.tree), ("注释结果", app.annot_tree),
+                     ("变异注释", app.var_annot_tree), ("QC 指标", app.qc_text),
+                     ("输出文件", app.files_tree), ("运行日志", app.log_text)):
+    check(str(widget.cget("xscrollcommand")) != "",
+          f"{page} 页有水平滚动条")
+# fixed-width columns are what make the horizontal scrollbar useful
+check(int(app.var_annot_tree.column("type", "stretch")) == 0,
+      "table columns keep their width instead of being squeezed")
+check(int(app.var_annot_tree.column("consequence_zh", "stretch")) == 1,
+      "while the last column absorbs the spare room")
+
+print("\n=== 6q) 输出文件 shows human-readable sizes ===")
+sizes = Path(tempfile.mkdtemp(prefix="nanoamp_gui_sizes_"))
+(sizes / "empty.tsv").write_bytes(b"")
+(sizes / "small.tsv").write_bytes(b"x" * 512)
+(sizes / "medium.tsv").write_bytes(b"x" * 2048)
+(sizes / "roomy.tsv").write_bytes(b"x" * (150 * 1024))
+(sizes / "big.tsv").write_bytes(b"x" * (3 * 1024 * 1024))
+app._clear_results()
+app._load_files(sizes)
+shown_sizes = {app.files_tree.item(i, "values")[0]: app.files_tree.item(i, "values")[1]
+               for i in app.files_tree.get_children()}
+check(shown_sizes["empty.tsv"] == "0 B", "an empty file is 0 B",
+      shown_sizes["empty.tsv"])
+check(shown_sizes["small.tsv"] == "512 B", "below 1 KB the unit is B",
+      shown_sizes["small.tsv"])
+check(shown_sizes["medium.tsv"] == "2.0 KB", "then KB", shown_sizes["medium.tsv"])
+check(shown_sizes["roomy.tsv"] == "150 KB", "three digits need no decimal",
+      shown_sizes["roomy.tsv"])
+check(shown_sizes["big.tsv"] == "3.0 MB", "then MB", shown_sizes["big.tsv"])
+check(NanoampApp._human_size(5 * 1024 ** 3) == "5.0 GB", "and GB",
+      NanoampApp._human_size(5 * 1024 ** 3))
+check(app.files_tree.heading("size", "text") == "大小",
+      "the column heading no longer claims bytes",
+      app.files_tree.heading("size", "text"))
+
+print("\n=== 6r) QC 指标说明 ===")
+app.var_qc_help.set(False)
+app._toggle_qc_help()
+root.update_idletasks()
+check(app.qc_help_frame.winfo_manager() == "",
+      "the glossary is hidden until it is asked for",
+      repr(app.qc_help_frame.winfo_manager()))
+app.var_qc_help.set(True)
+app._toggle_qc_help()
+root.update_idletasks()
+check(app.qc_help_frame.winfo_manager() == "grid",
+      "ticking 指标说明 puts the glossary on the page")
+check(app.qc_help_frame.master is app.qc_text.master,
+      "on the same page as the metrics (right-hand side)")
+glossary = app.qc_help_text.get("1.0", "end")
+for metric in ("mode", "mapping_rate", "exact_any_proportion", "clustering_seed",
+               "annotation_enabled", "n_transcripts_skipped", "n_inframe"):
+    check(metric in glossary, f"the glossary explains {metric}")
+qc_switches = [w for w in walk(app)
+               if "checkbutton" in w.winfo_class().lower()
+               and str(w.cget("variable")) == str(app.var_qc_help)]
+check(len(qc_switches) == 1, "exactly one 指标说明 checkbox", f"{len(qc_switches)} found")
+check(app.qc_text.get("1.0", "end").strip() == "" and app.worker is None,
+      "the glossary needs no analysis result and starts no run")
+app.var_qc_help.set(False)
+app._toggle_qc_help()
 
 print("\n=== 7) the window still fits with the new panels ===")
 # The optional panels are off here: with them hidden the window keeps its
