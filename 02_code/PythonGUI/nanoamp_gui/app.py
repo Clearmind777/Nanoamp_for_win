@@ -28,7 +28,10 @@ from tkinter import filedialog, messagebox, ttk
 
 from .r_runner import NanoampRunner, RNotFoundError, find_rscript
 
-APP_TITLE = "nanoamp - 纳米孔 PCR 产物分析"
+# Window title and the heading inside the window. Deliberately just the program
+# name: the window is the only thing a user sees and the descriptive suffix only
+# made the taskbar entry and the heading long.
+APP_TITLE = "nanoamp"
 MODES = [
     ("A - 参考引导（默认）", "A"),
     ("B - 从头聚类", "B"),
@@ -787,7 +790,7 @@ class NanoampApp(ttk.Frame):
             filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
         )
         if path:
-            self.var_annot_custom.set(path)
+            self.var_annot_custom.set(self.normalize_path_text(path))
             self.var_annot_source.set(ANNOTATION_CUSTOM)
             self._sync_annotation_state()
 
@@ -1015,13 +1018,31 @@ class NanoampApp(ttk.Frame):
         self._append_log("初始化完成。")
 
     # ------------------------------------------------------------ actions
+    @staticmethod
+    def normalize_path_text(value: str) -> str:
+        """Show every path with Windows backslash separators.
+
+        Tk's file dialogs return forward-slash paths while the paths this window
+        builds with pathlib use backslashes, so one dialog could show
+        `D:/data/x.fastq` next to `D:\\data\\ref.fa`. R accepts either, but the
+        window should not mix them: a path copied out of it has to be usable as
+        is. UNC and relative paths keep their meaning.
+        """
+        text = str(value).strip()
+        if not text:
+            return ""
+        try:
+            return str(Path(text))
+        except (OSError, ValueError):
+            return text
+
     def _pick_reads(self) -> None:
         path = filedialog.askopenfilename(
             title="选择测序 FASTQ",
             filetypes=[("FASTQ", "*.fastq *.fq *.fastq.gz *.fq.gz"), ("所有文件", "*.*")],
         )
         if path:
-            self.var_reads.set(path)
+            self.var_reads.set(self.normalize_path_text(path))
             if not self.var_reference.get():
                 self._suggest_reference(Path(path))
 
@@ -1031,19 +1052,19 @@ class NanoampApp(ttk.Frame):
             filetypes=[("FASTA", "*.fa *.fasta *.fna *.fas"), ("所有文件", "*.*")],
         )
         if path:
-            self.var_reference.set(path)
+            self.var_reference.set(self.normalize_path_text(path))
 
     def _pick_outdir(self) -> None:
         path = filedialog.askdirectory(title="选择输出目录")
         if path:
-            self.var_outdir.set(path)
+            self.var_outdir.set(self.normalize_path_text(path))
 
     def _suggest_reference(self, reads: Path) -> None:
         """If the reads sit in a sample directory, offer its reference file."""
         for name in ("reference.self.fa", "reference.fa", "reference.wt.fa"):
             cand = reads.parent / name
             if cand.is_file():
-                self.var_reference.set(str(cand))
+                self.var_reference.set(self.normalize_path_text(str(cand)))
                 return
 
     def _on_run(self) -> None:

@@ -34,6 +34,10 @@ BiocManager::install("pwalign")
 install.packages(c("shiny", "DT"))
 ```
 
+`ShortRead` is deliberately **not** required: the package reads FASTQ itself
+(`R/io.R` handles plain and gzip input and rejects malformed records), which also
+keeps `pwalign` an optional provider instead of a hard dependency.
+
 ### 2. Install `nanoamp`
 
 From a built tarball (for example the one produced by `make check`; adjust the
@@ -142,6 +146,13 @@ Mode B is applicable when:
 If `DECIPHER` is unavailable, Mode B falls back to variant-pattern greedy
 clustering and records this in `qc.tsv`.
 
+`DECIPHER::Clusterize` is stochastic upstream (the same input under a different
+RNG state returned 29 vs 30 clusters at one cutoff), so nanoamp seeds that call
+and records the seed in `qc.tsv` as `clustering_seed` (default 42). The caller's
+RNG stream is saved and restored, so a library call cannot disturb the session it
+was called from; without the seed, every Mode B result would differ between runs
+and the functional-regression baseline could not be compared.
+
 ### Mode C: raw exact matching (diagnostic)
 
 Mode C counts raw reads that match the reference exactly on either strand. It
@@ -174,6 +185,53 @@ nanoamp_defaults()
 | `threads` | 4 | Number of threads |
 | `keep_intermediates` | `TRUE` | Keep BAM and other intermediate files |
 
+## Functional annotation (optional)
+
+Annotation is opt-in and off by default: without `annotation = "<config.json>"`
+(CLI: `--annotate-config`) the outputs are byte for byte what they were before
+the feature existed. When enabled, each haplotype's variants are translated into
+biological consequences:
+
+- **`cds` route (offline)**: the config supplies the CDS interval on the amplicon
+  reference (`start`, `end`, `strand`, `frame`, `boundaries`). The length must be
+  a multiple of three. No network, no reference files.
+- **`genome` route (online)**: the amplicon is located in GRCh38 and the
+  transcript structure is fetched from Ensembl REST. A reference that does not
+  match the genome well enough is refused with an actionable error rather than
+  force-located.
+
+Extra outputs (see `shared/docs/output_schema.md` for every column):
+
+| File | Content |
+|---|---|
+| `annotation.tsv` | One row per haplotype × transcript: English/Chinese consequence, protein change, `consequence_any_transcript`, `transcript_conflict` |
+| `variants_annotation.tsv` | `annotation_detail = TRUE`: one row per variant with genomic/CDS position, codon and amino-acid change |
+| `transcripts.tsv` | `list_transcripts = TRUE`: the transcripts overlapping the amplicon |
+
+Skipped transcripts are recorded, not hidden: `qc.tsv` carries
+`n_transcripts_annotated`, `n_transcripts_skipped` and (when something was
+dropped) `annotation_skip_reason`, and `run_manifest.json` lists every dropped
+transcript under `annotation.skipped_transcripts`. A run whose annotation was
+skipped still exits 0, because the sequence analysis itself succeeded; use
+`strict = TRUE` (CLI `--strict`) to turn that into a non-zero exit for pipelines.
+Annotation adds no new R dependency (Biostrings/jsonlite are already required);
+the online route additionally needs an HTTP client (`curl.exe` preferred, with an
+R download fallback).
+
+Example configs ship inside the package (`inst/configs/example_cds.json`,
+`example_online.json`); `nanoamp doctor` prints the directory, and `install.exe`
+also copies them to `<install root>\configs\`.
+
+## Runtime status
+
+Each run writes `run_manifest.json` and `nanoamp.log` into the output directory.
+The manifest records the parameters, versions and input checksums plus
+`status` (`done`/`failed`/`cancelled`), `error_class`
+(`input`/`environment`/`network`/`internal`), `error_message` and `log_path`. A
+failed run creates the directory and writes both files, so a failure is never
+indistinguishable from a run that produced nothing. Exit codes are 0 for success
+and 1 for failure.
+
 ## Output files
 
 ```text
@@ -183,7 +241,11 @@ outdir/
 |-- variants.tsv
 |-- qc.tsv
 |-- run_manifest.json
-`-- alignments.bam(.bai)     # Modes A and B, when keep_intermediates = TRUE
+|-- nanoamp.log                # the same log the console shows (written even on failure)
+|-- annotation.tsv             # annotation = TRUE
+|-- variants_annotation.tsv    # annotation_detail = TRUE
+|-- transcripts.tsv            # list_transcripts = TRUE
+`-- alignments.bam(.bai)       # Modes A and B, when keep_intermediates = TRUE
 ```
 
 ### haplotypes.tsv
@@ -215,7 +277,22 @@ Chr  Pos  Ref  Alt  DP  Ref_dp  Alt_dp  Freq  DP4  Seq  Filter_Status  Filter_Re
 ### qc.tsv
 
 Two columns, `metric` and `value`, including read counts, mapping rate, mean
-identity, coverage, clustering method, consensus method, and DECIPHER version.
+identity, coverage, clustering method, consensus method and DECIPHER version.
+Mode B adds `clustering_seed` and `clustering_note`; `aligner = "r"` adds
+`pairwise_provider`. Annotation adds `annotation_enabled`, `annotation_name`,
+`annotation_route`, `annotation_source`, `ensembl_release`, `genetic_code`,
+`n_transcripts`, `n_transcripts_annotated`, `n_transcripts_skipped`,
+`annotation_available`, `n_haplotypes_annotated`, `n_haplotypes_skipped`,
+`n_frameshift`, `n_stop_gained`, `n_stop_lost`, `n_start_lost`, `n_missense`,
+`n_synonymous`, `n_inframe`, `n_transcript_conflicts` and, when transcripts were
+dropped, `annotation_skip_reason`.
+
+### run_manifest.json
+
+Parameters, versions, reference metadata, input checksums, the QC values and (when
+annotation ran) an `annotation` section with `enabled`, `available`, `source`,
+`ensembl_release`, `config`, `genomic`, `transcripts` and `skipped_transcripts`.
+It also carries the run status described under *Runtime status* above.
 
 ## Command line interface
 
@@ -248,6 +325,32 @@ Optional columns: `ref_label`.
 Use `--aligner r` to select the R-native alignment backend on platforms
 without minimap2. The repository-level launcher is `02_code/cli/nanoamp`
 (`02_code/cli/nanoamp.bat` on Windows).
+
+### Subcommands and the flags that changed most recently
+
+```text
+nanoamp call   --reads <fastq> --reference <fasta> --outdir <dir> [--mode A|B|C]
+nanoamp batch  --sample-sheet <tsv> --outdir <dir> [--mode A|B|C]
+nanoamp doctor [--check-online]
+nanoamp cache  [--cache-dir <dir>] [--clear]
+nanoamp help
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--min-ref-coverage <p>` | 0.90 | Minimum fraction of the reference a read must cover |
+| `--annotate-config <config.json>` | off | Enables annotation; the route comes from the file's `"route"` field |
+| `--transcript <ENST...\|all>` | config value | Restrict annotation to one transcript, or annotate all of them |
+| `--list-transcripts` | off | Print the overlapping transcripts and exit (also writes `transcripts.tsv`) |
+| `--annotation-proteins` / `--annotation-detail` | off | Add protein sequences to `annotation.tsv` / write `variants_annotation.tsv` |
+| `--cache-dir <dir>` / `--no-cache` / `--clear-cache` | — | Cache location, bypass for one run (never deletes), and empty-and-exit (works without input files) |
+| `--strict` | off | Annotation that had to skip transcripts becomes a non-zero exit |
+
+`doctor --check-online` reports whether Ensembl is reachable and exits non-zero
+when it is not; `nanoamp cache` prints the cache directory, size and file count.
+The cache directory is resolved as `NANOAMP_CACHE_DIR` →
+`%LOCALAPPDATA%\nanoamp\cache\ref` → `%TEMP%\nanoamp\ref`, and a corrupted cache
+entry is dropped and refetched instead of being reused.
 
 ### Install the `nanoamp` command
 
@@ -307,6 +410,11 @@ run_haplotype_analysis(..., aligner = "r")
 The R-native backend uses Biostrings pairwise alignment and requires no
 external tool. It is slower and is intended for small and medium amplicons.
 
+It reports the coverage, identity and aligned end of the reference segment a read
+actually aligned to. (Earlier versions reported the whole reference as covered for
+every read, so a half-length read passed `--min-ref-coverage 0.99` and was counted
+as the reference haplotype; the default `minimap2` backend was always correct.)
+
 `samtools` is optional: SAM -> BAM conversion uses `Rsamtools::asBam()` by
 default. Set `use_samtools = TRUE` only when the samtools path is explicitly
 required.
@@ -364,8 +472,21 @@ Rscript 02_code/r/inst/scripts/run_functional_tests.R \
   --outdir tmp/test_results/r/test_run_2 --modes A,B,C --threads 4
 ```
 
-The package has been verified with `R CMD check` and currently passes with
-`Status: OK`.
+The package has been verified with `R CMD check` (currently `Status: OK`) and
+with 48 testthat cases / 192 assertions. The repository also runs a functional
+regression over every sample in `01_data/` (168 runs) and compares it row by row
+against the committed baseline in `03_dependence/baselines/functional/`:
+
+```bash
+make functional-test       # run the regression and compare with the baseline
+make functional-baseline   # re-run and refresh the baseline (review the diff!)
+```
+
+`make stress-test` runs the automatable part of the environment stress matrix
+(network/proxy/cache, degenerate inputs, paths with spaces and Chinese characters,
+over-long paths, cancellation, concurrency); the last full run was
+47 PASS / 0 FAIL / 2 SKIP, the two skips being the manual cases (disk full,
+ARM64).
 
 ## Troubleshooting
 
@@ -377,6 +498,8 @@ The package has been verified with `R CMD check` and currently passes with
 | Mode B cannot resolve closely related haplotypes | This is expected below the sequencing error rate; use Mode A |
 | `DECIPHER` not installed | Mode B falls back to greedy clustering; install DECIPHER for better results |
 | `pairwiseAlignment` is not an exported object from Biostrings | Bioconductor >= 3.19 moved it to `pwalign`; install it with `BiocManager::install("pwalign")` |
+| Annotation was skipped but the run exited 0 | That is the documented degradation: read `qc.tsv`'s `annotation_skip_reason` and the manifest's `annotation.skipped_transcripts`, or add `--strict` to fail instead |
+| Ensembl unreachable / online route fails | Check network/proxy, retry with `--no-cache`, or switch the config to `"route": "cds"` (offline, needs the CDS interval) |
 | All proportions are low in Mode C | Nanopore reads contain errors; use Mode A |
 
 ## License

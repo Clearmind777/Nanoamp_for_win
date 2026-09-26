@@ -99,25 +99,31 @@ D:\nanoamp\
 
 ## 3. 图形界面操作步骤
 
-窗口自上而下分为四个区域：
+窗口自上而下分为四个区域（标题、输入、结果区、按钮与状态行）：
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  nanoamp - 纳米孔 PCR 产物分析                            │
+│  nanoamp                                                │
+│  本程序为 nanoamp R 包的图形界面。                      │
 ├─────────────────────────────────────────────────────────┤
-│  输入                                                    │
-│   测序文件 (FASTQ)  [__________________] [浏览…]         │  ← ① 选择 FASTQ 文件
-│   目的序列 (FASTA)  [__________________] [浏览…]         │  ← ② 选择参考序列
-│   输出目录          [__________________] [浏览…]         │  ← ③ 选择输出目录
-│   模式 [A - 参考引导 ▾]   显示前 n 条 [20]                │  ← ④ 通常无需修改
+│  输入                                                   │
+│   测序文件 (FASTQ)  [__________________] [浏览…]        │  ← ① 选择 FASTQ 文件
+│   目的序列 (FASTA)  [__________________] [浏览…]        │  ← ② 选择参考序列
+│   输出目录          [__________________] [浏览…]        │  ← ③ 选择输出目录
+│   模式 [A - 参考引导 ▾]   显示前 n 条 [20]              │  ← ④ 通常无需修改
+│   [ ] 功能注释…   [ ] 高级参数…                         │  ← ⑤ 可选面板开关，默认都不勾选
+│   配置来源 [离线 CDS（不联网） ▾]                       │  ← ⑥ 勾选「功能注释…」后出现
+│   CDS 起 [118] 止 [237] 链 [+ ▾] 读码框 [0 ▾]           │
+│   [ ] 输出变异级明细  [ ] 输出蛋白序列                  │
+│   转录本 [自动选择（MANE / 规范） ▾] [列出转录本]       │
 ├─────────────────────────────────────────────────────────┤
-│  [单倍型结果] [QC 指标] [输出文件] [运行日志]              │  ← ⑤ 结果区
-│  排名 │ 编号 │ reads 数 │ 占比 │ 是否一致 │ 变异 │ ...    │
-│  ...                                                     │
-│  ┌ 选中某一行会显示这条序列的完整碱基 ─────────────┐       │
+│  [单倍型结果] [注释结果] [变异注释]                     │  ← ⑦ 结果区
+│  [QC 指标] [输出文件] [运行日志]                        │
+│  排名 │ 编号 │ reads 数 │ 占比 │ 是否与目的序列一致     │
+│  ┌ 选中某一行会显示这条单倍型的完整序列 ──────────┐     │
 ├─────────────────────────────────────────────────────────┤
-│  [开始分析] [环境自检]              [打开输出目录]  ▓▓▓  │  ← ⑥ 开始分析
-│  就绪。选择 FASTQ 和参考序列后点击"开始分析"。             │
+│  [开始分析] [环境自检] [复制诊断信息] [打开输出目录]    │  ← ⑧ 点这里开始
+│  就绪。选择 FASTQ 和参考序列后点击"开始分析"。          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -128,11 +134,20 @@ D:\nanoamp\
    - 若 fastq 所在文件夹中存在 `reference.self.fa`，选择 fastq 后会自动填入该文件。
 3. **输出目录** 默认是 `我的文档\nanoamp 结果`，通常无需修改。
 4. **模式** 保持 `A - 参考引导（推荐）`，**显示前 n 条** 保持 20。
-5. 点 **「开始分析」**，等待数秒至数十秒，取决于数据量。
-6. 状态栏显示「分析完成」后，结果位于「单倍型结果」标签页中。
+5. 需要判断变异会不会改变蛋白时，勾选 **「功能注释…」** 并选一条路线（见 §4 的
+   「功能注释（可选）」）；需要改比对方式、线程或阈值时，勾选 **「高级参数…」**
+   （见 §4 的「高级参数（可选）」）。两者都是可选的，
+   **不勾选时分析结果与以前完全一致**。
+6. 点 **「开始分析」**，等待数秒至数十秒，取决于数据量。
+7. 状态栏显示「分析完成」后，结果位于「单倍型结果」标签页中。
 
-> 需要确认环境状态时，可先执行一次 **「环境自检」**，该操作会将 R、依赖包、minimap2
-> 的状态输出到「运行日志」中。
+> 需要确认环境状态时，可先执行一次 **「环境自检」**，该操作会将 R、依赖包、minimap2、
+> curl、缓存目录、配置目录与注释可用性的状态输出到「运行日志」中。
+> 出错时点 **「复制诊断信息」** 可以把整段日志复制到剪贴板。
+
+> 界面里显示的路径统一使用 Windows 反斜杠（例如 `D:\data\reads.fastq`）。文件对话框返回
+> 的是正斜杠，程序在填入输入框时会统一转换，因此从界面里复制出来的路径可以直接粘到
+> 命令行或脚本里使用。
 
 ---
 
@@ -190,18 +205,33 @@ D:\nanoamp\
 | `haplotypes.fasta` | 前 n 条单倍型的完整序列 |
 | `variants.tsv` | 所有候选变异位点，格式与公司 `*.var.xls` 兼容 |
 | `qc.tsv` | 质量指标 |
-| `run_manifest.json` | 本次运行的参数、版本、输入文件校验值（可追溯） |
+| `run_manifest.json` | 本次运行的参数、版本、输入文件校验值，以及运行状态（见下） |
+| `nanoamp.log` | 与「运行日志」相同的完整日志，**失败时也会生成** |
+
+`run_manifest.json` 现在带结构化状态，便于排查和写脚本：
+
+| 字段 | 取值 |
+|---|---|
+| `status` | `done`（正常完成）/ `failed`（失败）/ `cancelled`（被取消） |
+| `error_class` | `input`（输入或配置）/ `environment`（环境、权限、磁盘）/ `network`（网络、代理）/ `internal`（程序自身） |
+| `error_message` | 可读的失败原因 |
+| `log_path` | 本次运行的 `nanoamp.log` 路径 |
+
+**失败的运行也会创建输出目录并写下这两个文件**，所以"失败"与"什么都没产出"不会无法
+区分。退出码保持 0（成功）/ 1（失败）。
 
 ### 功能注释（可选）
 
-勾选输入区的**「功能注释…」**即启用：程序会把每条单倍型的变异翻译成生物学后果
+勾选输入区的**「功能注释…」**即启用（命令行等价开关是
+`--annotate-config <config.json>`）：程序会把每条单倍型的变异翻译成生物学后果
 （移码 / 提前终止 / 终止丢失 / 整码插入缺失 / 错义 / 同义，以及 UTR、内含子、剪接区），
-并在输出目录多写两个文件：
+并在输出目录多写这些文件：
 
 | 文件 | 内容 |
 |---|---|
 | `annotation.tsv` | 每个「单倍型 × 转录本」一行，含中英双列后果、蛋白变化、转录本冲突标记 |
-| `variants_annotation.tsv` | 勾选「输出变异级明细」时生成：每个变异一行，含 CDS 坐标、密码子与氨基酸变化 |
+| `variants_annotation.tsv` | 勾选「输出变异级明细」（命令行 `--annotation-detail`）时生成：每个变异一行，含 CDS 坐标、密码子与氨基酸变化 |
+| `transcripts.tsv` | 点「列出转录本」（命令行 `--list-transcripts`）时生成：扩增子重叠的转录本清单 |
 
 两条路线，界面里直接选：
 
@@ -210,9 +240,53 @@ D:\nanoamp\
 | **离线 CDS（不联网）** | 不需要 | 在界面里填 CDS 的起止坐标、链与读码框（坐标以目的序列为准，1-based；长度必须是 3 的倍数） |
 | **在线 genome（需联网）** | 需要 | 什么都不用填：程序自行在 GRCh38 定位扩增子并从 Ensembl 取转录本结构 |
 
+命令行还可以用 `--transcript <ENST…|all>` 指定注释哪一个（或全部）转录本，
+用 `--annotation-proteins` 在 `annotation.tsv` 里附带参考/突变蛋白序列。
+
 判断注释覆盖了哪些转录本，请以 **`qc.tsv` 的 `n_transcripts_annotated` /
 `n_transcripts_skipped` / `annotation_skip_reason`** 为准（「注释结果」页会把它们显示在状态行），
-**不要只看 `annotation.tsv` 有几行**。注释被跳过时退出码仍是 0，因为序列分析本身成功了。
+**不要只看 `annotation.tsv` 有几行**。注释被跳过时退出码仍是 0，因为序列分析本身成功了；
+命令行加 `--strict` 才会把它变成失败（供流水线使用）。
+
+示例配置随包提供，`nanoamp doctor` 会打印 `configs` 一行指出位置；安装器另外把一份
+可编辑的副本放在 `<安装目录>\configs\`。
+
+### 「注释结果」「变异注释」标签页 —— 与单倍型联动
+
+选中「单倍型结果」里的某一行，这两页会自动**只显示该单倍型**，标注行写明
+「仅显示 Hn（K / N 行）」；点「显示全部」恢复。反过来在注释页选中一行，也会选中
+「单倍型结果」里对应的行。
+
+选中一行后点 **「查看蛋白序列…」**（或双击该行），会打开一个可滚动、可复制的窗口，
+显示这条单倍型的参考蛋白与突变蛋白；没有蛋白列时它会提示勾选「输出蛋白序列」后重跑。
+
+### 高级参数（可选）
+
+勾选**「高级参数…」**后可以改：
+
+| 字段 | 默认 | 什么时候改 |
+|---|---|---|
+| **比对方式** | `minimap2`（内置比对程序） | 机器上没有可用的 minimap2（例如 ARM64）时改 `r`：纯 R 比对，慢一些但不需要外部程序 |
+| **线程** | 4 | 机器核多、样本大时可调到 8–16 |
+| **最小支持 reads / 最小频率** | 3 / 0.02 | 深度很低时放宽，想更保守时收紧 |
+| **最小一致度 / 最小覆盖** | 0.90 / 0.90 | 数据质量差时放宽；只保留完整覆盖的 reads 时提高 |
+| **聚类一致度 / 最小簇 reads / 簇共识** | 0.99 / 2 / decipher | 只影响模式 B |
+| **保留 BAM 等中间文件** | 勾选 | 不想要 BAM 时取消勾选 |
+
+**只有改动过的字段才会传给分析引擎**，所以勾上但不动任何值等于什么都没发生；填了
+非法值（非数字、频率不在 0–1）会在起跑前弹窗提示。「恢复默认值」一键复位。
+
+### 缓存与网络（在线路线用）
+
+「功能注释」面板底部另有一行：
+
+| 控件 | 作用 |
+|---|---|
+| **缓存** 信息 | 显示缓存目录、文件数与占用；「刷新」重新查询 |
+| **清空缓存** | 删除缓存（只删可以重新下载的参考数据，不影响结果文件） |
+| **测试 Ensembl 连接** | 现在能不能访问 Ensembl；不可用时状态行直接说明，离线 CDS 路线不受影响 |
+
+命令行对应 `nanoamp cache`、`nanoamp cache --clear` 与 `nanoamp doctor --check-online`。
 
 ---
 
@@ -292,7 +366,38 @@ R 的小版本之间二进制不兼容，所以：
 ### 分析时提示找不到 minimap2
 
 先点「环境自检」，查看 `minimap2` 那一行，应显示安装目录下的路径。若显示
-`NOT FOUND`，重新运行 `install.exe` 修复。
+`NOT FOUND`，重新运行 `install.exe` 修复；也可以勾选「高级参数…」把**比对方式**
+改成 `r`（纯 R 比对，不需要外部程序）。
+
+### 分析失败：怎么知道是哪一类问题
+
+打开输出目录里的 **`run_manifest.json`**，看三个字段：
+
+| 字段 | 含义与下一步 |
+|---|---|
+| `status` | `failed` 表示这次运行失败了（`done` 才是正常完成） |
+| `error_class` | `input`：检查选的文件与注释配置；`environment`：先点「环境自检」，必要时重装；`network`：检查网络/代理，或改用离线 CDS 路线；`internal`：把运行日志与这个文件一起反馈 |
+| `error_message` + `log_path` | 失败原因原文，以及完整的 `nanoamp.log` |
+
+界面也会按 `error_class` 给出对应的提示，而不是一句通用报错。
+
+### 注释被跳过 / 「注释不可用」
+
+**这不是分析失败**：序列分析本身成功了，所以退出码仍是 0。原因写在「注释结果」页的
+状态行、`qc.tsv` 的 `annotation_skip_reason`，以及 `run_manifest.json` 的
+`annotation.skipped_transcripts`。最常见的原因是离线路线的 CDS 长度不是 3 的倍数、
+坐标填错，或在线路线取不到数据。希望流水线把这种情况当失败时，命令行加 `--strict`。
+
+### 在线路线报错 / 连不上 Ensembl
+
+先勾选「功能注释…」，再点 **「测试 Ensembl 连接」**：
+
+- 显示不可用 → 检查网络与代理，或把「配置来源」改成 **`离线 CDS（不联网）`**（不需要
+  网络，只需要 CDS 坐标）；
+- 怀疑缓存有问题 → 点 **「清空缓存」**，或命令行用 `--clear-cache` 后再试
+  （也可以单次用 `--no-cache` 绕过缓存）；
+- 扩增子不在内置 panel（当前仅 ZNF8）时在线路线会退化为逐染色体扫描，可能非常慢，
+  建议改用离线路线。
 
 ### 结果里「是否一致」几乎没有「是」
 
@@ -344,13 +449,15 @@ release/             ← 发布产物：三个交付形态 + 安装器
   _offline/          离线依赖源材料（R 安装器、R 包、minimap2；进 offline-deps 资产）
   _build/            打包工作区（两个 zip 与 SHA256SUMS.txt；zip 不进 Git）
 02_code/             源码
-  r/                 nanoamp R 包源码
+  r/                 nanoamp R 包源码（R/annotate*.R、ref_online.R、io.R 等）
   cli/               CLI 入口脚本（make cli 用）
   gui/               R Shiny 图形界面（make gui 用）
   PythonGUI/         Python/Tkinter 图形界面源码（发行版 GUI 即其产物）
-  shared/            参数与输出契约
+  shared/            参数与输出契约（output_schema.md 含注释与状态字段）
 01_data/             测试数据（`<dataset>/<sample>/` 规范化命名，文件即数据）
 03_dependence/       内置的 minimap2.exe、R 环境脚本与编译方案
+  stress/            环境压力矩阵运行器（A–D 组）
+  baselines/functional/  提交入库的功能回归基线（168 次运行）
 00_materials/        委托文档、开发方案、历次工作报告、完整教程
   tutorial.md        教程：GUI 版 / CLI 版 / R 包版 + 依赖工具配置
 tmp/test_results/    运行输出（Git 忽略）
@@ -376,17 +483,23 @@ Rscript 03_dependence/r-environment/run_functional_regression.R `
 
 ```bash
 make install          # 安装 R 包
-make test             # testthat 测试
+make test             # testthat 测试（48 个用例 / 192 个断言）
 make check            # R CMD check
+make functional-test  # 168 次真实运行的功能回归，并与提交的基线逐行比较
+make functional-baseline  # 重跑回归并刷新基线（先看 diff）
+make stress-test      # 环境压力矩阵 A–D 组（A 组需要联网）
 make cli              # 运行 nanoamp doctor
 make gui              # 启动 Shiny 界面
 make gui-python       # 启动 Python/Tkinter 界面
 make gui-exe          # 重新打包 02_code/PythonGUI/dist/nanoamp.exe
-make gui-test         # Python 界面自测
+make gui-test         # Python 界面自测（7 个脚本）
 make install-exe      # 重新打包 release/install.exe
+make release-assets   # 重打 release/_build/ 下的两个资产
+make release-test     # 安装器/发布布局自测（9 个脚本）
 make deps             # 说明内置 minimap2.exe 的来源
 make toolchain        # 安装 MSYS2/MINGW-w64 编译链（重建 minimap2 用）
 make offline-bundle   # 获取离线依赖包
+make clean-scratch    # 清理打包临时目录
 ```
 
 ### 重新构建发布产物
@@ -410,6 +523,17 @@ python release/_installer/test_r_version_choice.py   # 系统 R / 随包 R 的�
 python release/_installer/test_pinned_deps.py        # 固定版本清单、选源与 minimap2 来源
 ```
 
+一次发布前的完整验证（都在本仓库实测通过）：
+
+| 验证 | 命令 / 结果 |
+|---|---|
+| R 包检查 | `R CMD check` → `Status: OK` |
+| 单元测试 | `Rscript 03_dependence/r-environment/run_tests.R` → 48 个用例 / 192 个断言 |
+| 功能回归 | `make functional-test` → 168 次运行与基线逐行一致 |
+| 环境压力矩阵 | `make stress-test` → 47 PASS / 0 FAIL / 2 SKIP（磁盘满、ARM64 需真机） |
+| Python 界面 | `make gui-test` → 7 个脚本全部通过 |
+| 安装器逻辑 | `make release-test` → 9 个脚本全部通过 |
+
 查看两个窗口的实际渲染效果（需要 `pip install pywinauto pillow`，仅开发用）：
 
 ```powershell
@@ -425,6 +549,8 @@ python release/_installer/capture_uninstaller_populated.py tmp/test_results/shot
 - `minimap2.exe` 由本仓库从上游源码编译并**静态链接**，只依赖
   `KERNEL32.dll` 和 `msvcrt.dll`，因此目标机器无需 MSYS2 / Cygwin / conda / WSL。
 - `samtools` **不需要**：SAM→BAM 默认由 `Rsamtools::asBam()` 完成。
+- R 包**自带 FASTQ 解析器**（`R/io.R`），因此不再需要 `ShortRead`；安装器的固定版本
+  清单是有意的超集，与包实际需要的集合可能不完全一致。
 - 本项目**不使用 conda，也不使用 WSL**。
 - 本仓库是 **Windows 变体**；Linux 变体在姊妹仓库
   `a_09_18_26_mapping_programs_dev_for_linux`。
@@ -442,6 +568,8 @@ python release/_installer/capture_uninstaller_populated.py tmp/test_results/shot
 | `02_code/r/README-CN.md` | R 包完整教程（中文） |
 | `02_code/PythonGUI/README.md` | Python 界面实现与打包细节 |
 | `03_dependence/README.md` | 内置工具与平台支持矩阵 |
+| `03_dependence/stress/README.md` | 环境压力矩阵的用例清单（含需真机的手工用例） |
+| `03_dependence/baselines/functional/README.md` | 功能回归基线的由来与刷新方法 |
 | `03_dependence/offline-bundle/README.md` | 离线安装包的设计与理由 |
 | `00_materials/README.md` | 委托文档与历次工作报告 |
 
@@ -460,12 +588,21 @@ python release/_installer/capture_uninstaller_populated.py tmp/test_results/shot
    - 注释结果依赖 Ensembl release（会记录在 `run_manifest.json` 的
      `annotation.ensembl_release`）；`protein_change` 是 HGVS 风格但**未经 HGVS 认证**，
      不应当作临床报告依据。
-5. **测试数据是普通文件**：`01_data/<dataset>/<sample>/` 里直接就是
+5. **可复现性**：方案 A / C 逐字节可复现；方案 B 的聚类引擎
+   `DECIPHER::Clusterize` 在上游是随机算法（同一输入换一个随机数状态，实测同一阈值下
+   得到 29 与 30 个簇），nanoamp 在调用前固定种子并把 `clustering_seed`（默认 42）
+   写进 `qc.tsv`，因此方案 B 也可复现；该种子只在调用期间生效，不影响你自己的 R 会话。
+6. **`--aligner r` 的覆盖度是真实覆盖度**：R 内比对后端早期版本把每条 read 都当作
+   覆盖整条参考序列（`ref_cov` 恒为 1、`qc.tsv` 的 `mean_coverage` 等于 reads 条数），
+   于是只覆盖一半的 read 也能通过 `--min-ref-coverage 0.99` 并被计为参考单倍型。
+   现在按实际比对到的参考片段计算；必要时可用 `--min-ref-coverage` 放宽阈值。
+   **默认的 `minimap2` 后端一直是对的**，这条只影响显式用 `r` 的场合。
+7. **测试数据是普通文件**：`01_data/<dataset>/<sample>/` 里直接就是
    `reads.fastq` / `reference.self.fa` / `consensus.N.fa` / `variants.N.xlsx` /
    `sanger.N.ab1`，随仓库一起提交，**克隆后不需要任何准备步骤**。
    每个样本目录里的 `meta.tsv` 记录这些文件原本是公司的哪个交付文件。
    详见 `01_data/README.md`。
-6. **仓库体积**：`.git` 里含 `release/_offline` 的离线负载（R 安装器 87 MB 等），
+8. **仓库体积**：`.git` 里含 `release/_offline` 的离线负载（R 安装器 87 MB 等），
    完整克隆约 320 MB。发布包可直接解压使用，使用者不需要克隆仓库。
 
 ---

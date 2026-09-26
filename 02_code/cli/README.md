@@ -9,7 +9,8 @@ implementation.
 ```text
 nanoamp call   --reads <fastq> --reference <fasta> --outdir <dir> [--mode A|B|C] [options]
 nanoamp batch  --sample-sheet <tsv> --outdir <dir> [--mode A|B|C] [options]
-nanoamp doctor
+nanoamp doctor [--check-online]
+nanoamp cache  [--cache-dir <dir>] [--clear]
 nanoamp help
 ```
 
@@ -25,6 +26,7 @@ nanoamp help
 | `--min-reads` | int | 3 | Minimum supporting reads per variant |
 | `--min-freq` | float | 0.02 | Minimum variant frequency |
 | `--min-identity` | float | 0.90 | Minimum read identity |
+| `--min-ref-coverage` | float | 0.90 | Minimum fraction of the reference a read must cover |
 | `--identity-cutoff` | float | 0.99 | Mode B clustering identity cutoff |
 | `--min-cluster-reads` | int | 2 | Mode B minimum cluster size |
 | `--consensus-method` | string | `decipher` | `decipher` or `medoid` |
@@ -32,6 +34,38 @@ nanoamp help
 | `--threads` | int | 4 | Number of threads |
 | `--ref-label` | string | reference name | Reference label in outputs |
 | `--no-intermediates` | flag | false | Do not keep BAM files |
+
+## Functional annotation options (optional)
+
+Annotation is opt-in: without `--annotate-config` the outputs are byte-identical to
+a run without it.
+
+| Option | Type | Default | Description |
+|---|---:|---:|---|
+| `--annotate-config` | path | off | JSON config; the **only** switch that enables annotation. Its `"route"` is `genome` (online) or `cds` (offline) |
+| `--transcript` | string | from config | `ENST…` or `all`; overrides the config for this run only |
+| `--list-transcripts` | flag | false | Print the amplicon's overlapping transcripts, write `transcripts.tsv`, and exit |
+| `--annotation-proteins` | flag | false | Add reference/alternate protein columns to `annotation.tsv` |
+| `--annotation-detail` | flag | false | Also write `variants_annotation.tsv` |
+| `--cache-dir` | path | per-user cache | Reference-slice cache location (`NANOAMP_CACHE_DIR`) |
+| `--no-cache` | flag | false | Do not read or write the cache for this run (never deletes it) |
+| `--clear-cache` | flag | — | Empty the cache and exit; works **without** `--reads`/`--reference`/`--outdir` |
+| `--strict` | flag | false | Exit non-zero when annotation had to skip transcripts |
+
+An abbreviated flag such as `--annotate` is rejected with the closest implemented
+option named; `--annotation-route` does not exist (the route lives in the config);
+`--ensembl-release` is not implemented (read `annotation.ensembl_release` from
+`run_manifest.json`).
+
+## doctor / cache
+
+`nanoamp doctor` prints R, dependency, tool and annotation prerequisites,
+including `curl`, `cache-dir`, `cache-size`, `configs` and `annotation`.
+With `--check-online` it additionally probes Ensembl and exits non-zero when it
+is unreachable, so the online route can be checked before a run.
+
+`nanoamp cache` prints `cache-dir`, `cache-size` and `cache-files`;
+`--clear` empties the cache (only data that can be re-downloaded).
 
 ## Batch input
 
@@ -77,9 +111,15 @@ Rscript --vanilla -e "library(nanoamp); nanoamp_cli()" %*
 
 ## Outputs
 
-`call` writes `haplotypes.tsv`, `haplotypes.fasta`, `variants.tsv`, `qc.tsv` and
-`run_manifest.json` into `--outdir`. Field definitions are in
-`02_code/shared/docs/output_schema.md`.
+`call` writes `haplotypes.tsv`, `haplotypes.fasta`, `variants.tsv`, `qc.tsv`,
+`run_manifest.json` and `nanoamp.log` into `--outdir`; with annotation enabled it
+also writes `annotation.tsv` (and `variants_annotation.tsv` with
+`--annotation-detail`, `transcripts.tsv` with `--list-transcripts`). Field
+definitions are in `02_code/shared/docs/output_schema.md`.
+
+`run_manifest.json` carries `status` (`done`/`failed`), `error_class`
+(`input`/`environment`/`network`/`internal`), `error_message` and `log_path`, and a
+failed run writes the manifest and the log too.
 
 ## External tools
 
@@ -92,8 +132,9 @@ handled by `Rsamtools` by default.
 
 | Code | Meaning |
 |---:|---|
-| 0 | Success |
-| 1 | Any error (invalid arguments, missing input, missing dependency, analysis failure) |
+| 0 | Success (including a run that had to skip annotation transcripts — that is recorded in `qc.tsv`/`run_manifest.json`) |
+| 1 | Any error (invalid arguments, missing input, missing dependency, network failure, analysis failure; also annotation skipped transcripts when `--strict` is given) |
 
-The current implementation uses R error handling, so all failures exit with
-code 1. More granular exit codes are a future improvement.
+All failures exit with code 1: the R error handling keeps a single non-zero code so
+the launcher and the GUI can rely on it. Use `--strict` to make a degraded
+annotation count as a failure.

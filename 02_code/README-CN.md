@@ -13,13 +13,15 @@
 |   `-- docs/output_schema.md
 |-- r/                      # nanoamp R 包
 |   |-- DESCRIPTION / NAMESPACE / LICENSE
-|   |-- R/
+|   |-- R/                  # align.R、io.R（自带 FASTQ 解析）、annotate.R、
+|   |                       #   annotate_config.R、ref_online.R、cli.R 等
 |   |-- inst/
+|   |   |-- configs/        # 随包分发的注释示例配置（进 tarball）
 |   |   |-- docs/           # 依赖安装教程
 |   |   |-- scripts/        # run_analysis.R、CLI、测试脚本
 |   |   |-- shiny/          # 独立 Shiny 入口
 |   |   `-- windows/        # RInno 打包骨架
-|   |-- tests/testthat/
+|   |-- tests/testthat/     # 48 个用例 / 192 个断言
 |   |-- exec/nanoamp        # 包内 CLI 包装
 |   |-- man/                # 生成的帮助文档
 |   `-- README.md / README-CN.md
@@ -91,15 +93,65 @@ Rscript -e "library(nanoamp); nanoamp_gui()"
 
 GUI 规划、启动脚本和 Windows 打包说明见 `gui/README.md`。
 
+## 功能注释（可选）
+
+默认关闭：不传 `--annotate-config`（命令行）或不勾选「功能注释…」（图形界面）时，
+输出与该功能出现之前**逐字节一致**。启用后，程序把每条单倍型的变异翻译成生物学后果，
+并多写这些文件：
+
+| 文件 | 内容 |
+|---|---|
+| `annotation.tsv` | 每个「单倍型 × 转录本」一行，含中英双列后果、蛋白变化与转录本冲突标记 |
+| `variants_annotation.tsv` | 加 `--annotation-detail` 时生成：每个变异一行，含 CDS 坐标、密码子与氨基酸变化 |
+| `transcripts.tsv` | 用 `--list-transcripts`（或图形界面的「列出转录本」）时生成：扩增子重叠的转录本清单 |
+
+两条路线写在配置文件里（`"route": "genome"` 或 `"cds"`）：
+
+- **`cds`（离线）**：使用者在扩增子参考上给出 CDS 区间（1-based、两端都算、长度必须是
+  3 的倍数），全程不联网；
+- **`genome`（在线）**：程序自行在 GRCh38 定位扩增子，并从 Ensembl REST 取转录本结构。
+
+被跳过的转录本会**记账而不是被隐藏**（`qc.tsv` 的 `annotation_skip_reason`、
+`run_manifest.json` 的 `annotation.skipped_transcripts`），此时退出码仍是 0（序列分析
+本身成功了）；流水线需要把它当失败时加 `--strict`。注释**不新增任何 R 依赖**
+（复用 Biostrings/jsonlite），唯一外部前提是在线路线需要 `curl.exe`，缺失时回退到
+R 自带的下载能力。示例配置随包分发（`inst/configs/`，路径见 `nanoamp doctor` 的
+`configs` 一行），`install.exe` 另会复制一份到 `<安装目录>\configs\`。
+
+这些功能对应的命令行接口：
+
+```text
+nanoamp call   --reads <fastq> --reference <fasta> --outdir <dir> [--mode A|B|C]
+nanoamp batch  --sample-sheet <tsv> --outdir <dir> [--mode A|B|C]
+nanoamp doctor [--check-online]      # 环境自检；顺带探测 Ensembl 连通性
+nanoamp cache  [--cache-dir <dir>] [--clear]
+nanoamp help
+```
+
+最近新增的参数：`--annotate-config`、`--transcript <ENST...|all>`、
+`--list-transcripts`、`--annotation-proteins`、`--annotation-detail`、
+`--min-ref-coverage <p>`、`--cache-dir`、`--no-cache`、`--clear-cache` 与 `--strict`；
+`qc.tsv` 里的 `clustering_seed` 记录让方案 B 可复现的随机种子。
+
+## 运行状态
+
+每次运行都会写 `run_manifest.json`（参数、版本、输入校验值，以及 `status` =
+`done`/`failed`/`cancelled`、`error_class` = `input`/`environment`/`network`/`internal`、
+`error_message`、`log_path`）和 `nanoamp.log`。**失败的运行也会创建输出目录并写下这两个
+文件**，因此"失败"与"什么都没产出"不会无法区分。退出码仍然是 0（成功）/ 1（失败）。
+
 ## 当前状态
 
 | 组件 | 状态 |
 |---|---|
-| R 包 | 已实现，并通过 `R CMD check`（`Status: OK`） |
-| 基于 R 的 CLI | 已实现（`nanoamp_cli()` 和 `02_code/cli`） |
+| R 包 | 已实现；`R CMD check` 为 `Status: OK`；48 个 testthat 用例 / 192 个断言；自带 FASTQ 解析，不依赖 `ShortRead` |
+| 基于 R 的 CLI | 已实现（`nanoamp_cli()` 和 `02_code/cli`），含 `doctor [--check-online]` 与 `cache [--clear]` |
+| 功能注释 | 已实现并有测试（离线 `cds` 与在线 `genome` 两条路线） |
+| 功能回归 | `01_data/` 上 168 次运行与 `03_dependence/baselines/functional/` 中提交入库的基线逐行比对（`make functional-test`）；方案 B 通过记录的 `clustering_seed` 可复现 |
+| 环境压力矩阵 | `03_dependence/stress/run_stress_tests.py`（A–D 组）：最近一次全量 47 PASS / 0 FAIL / 2 SKIP（需真机的磁盘满与 ARM64） |
 | R Shiny GUI | 初版已实现（`nanoamp_gui()` 和 `02_code/gui`） |
-| Python/Tkinter GUI | 已实现，打包为 `02_code/PythonGUI/dist/nanoamp.exe` |
-| Windows 安装包 | 已实现，使用 PyInstaller 构建（`release/_installer/`；产出 `install.exe` 与 `uninstall.exe`） |
+| Python/Tkinter GUI | 已实现，打包为 `02_code/PythonGUI/dist/nanoamp.exe`；7 个自测脚本全部通过 |
+| Windows 安装包 | 已实现，使用 PyInstaller 构建（`release/_installer/`；产出 `install.exe` 与 `uninstall.exe`）；9 个逻辑测试脚本全部通过 |
 
 外部工具统一放在 `03_dependence/`；平台支持矩阵和 R 内后备方案见
 `03_dependence/README-CN.md`。
@@ -107,6 +159,8 @@ GUI 规划、启动脚本和 Windows 打包说明见 `gui/README.md`。
 ## 共享契约
 
 - `shared/params/default_params.json`：参数名与默认值；
-- `shared/docs/output_schema.md`：输出文件与字段定义；
+- `shared/docs/output_schema.md`：输出文件与字段定义，含注释章节
+  （`transcripts.tsv`、`annotation.tsv`、`variants_annotation.tsv`、后果词表、
+  注释 QC 指标）以及 `run_manifest.json` 的状态字段；
 - `cli/README.md`：CLI 命令契约；
 - `gui/README.md`：GUI 行为与部署规划。

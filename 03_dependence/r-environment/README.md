@@ -50,8 +50,12 @@ Rscript 03_dependence/r-environment/setup_r_environment.R
 
 This installs `BiocManager`, `data.table`, `jsonlite`, `optparse`, `readxl`,
 `testthat`, `pkgload`, the Bioconductor packages `Biostrings`, `IRanges`,
-`Rsamtools`, `ShortRead`, and the optional `shiny`, `DT`, `DECIPHER`
+`Rsamtools`, and the optional `shiny`, `DT`, `DECIPHER`
 (Mode B clustering) and `pwalign` (see the compatibility note below).
+`ShortRead` is deliberately not installed: nanoamp reads FASTQ itself
+(`02_code/r/R/io.R`), and requiring ShortRead would drag `pwalign` into every
+installation as a hard dependency. The installer's pinned dependency set is a
+superset and still lists it, so an installed machine may have it anyway.
 
 ## 4. Install nanoamp and run the tests
 

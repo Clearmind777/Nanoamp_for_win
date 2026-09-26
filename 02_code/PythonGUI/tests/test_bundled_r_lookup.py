@@ -62,9 +62,15 @@ def check_library_paths(failures: list[str]) -> None:
     try:
         expected = (root / "R" / "lib").as_posix()
         (root / "R" / "lib").mkdir(parents=True, exist_ok=True)
-        saved = {k: os.environ.get(k) for k in ("NANOAMP_R_LIB", "LOCALAPPDATA", "NANOAMP_HOME")}
+        saved = {k: os.environ.get(k)
+                 for k in ("NANOAMP_R_LIB", "LOCALAPPDATA", "NANOAMP_HOME")}
         os.environ.pop("NANOAMP_R_LIB", None)
         os.environ["NANOAMP_HOME"] = str(root)
+        # Isolate from any installation recorded on this machine: an earlier
+        # `install.exe` run (for example a sandbox one) leaves
+        # %LOCALAPPDATA%\nanoamp.path behind, and its R\lib would then legitimately
+        # come first - which is not what this check is about.
+        os.environ["LOCALAPPDATA"] = str(root / "localappdata")
         try:
             libs = rr._candidate_libs(root)
             print(f"  candidate libs   -> {libs[:2]}{' ...' if len(libs) > 2 else ''}")

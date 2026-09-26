@@ -24,11 +24,22 @@ nanoamp **Windows 版本**随项目分发的外部工具目录。
 |   |-- README.md
 |   |-- fetch_offline_bundle.R
 |   `-- install_offline.ps1
+|-- stress/                           # 环境压力矩阵
+|   |-- README.md
+|   |-- run_stress_tests.py           # A–D 组，跑真实 CLI
+|   `-- data/znf8_exon_amplicon.fa    # 在线用例使用的真实 GRCh38 片段
+|-- baselines/
+|   `-- functional/                   # 提交入库的功能回归基线
+|       |-- README.md
+|       |-- comparison.tsv
+|       |-- summary_by_mode.tsv
+|       `-- run_index.tsv
 `-- r-environment/                    # Windows 下的 R 环境与测试脚本
     |-- README.md
     |-- setup_r_environment.R
     |-- run_tests.R
-    `-- run_functional_regression.R
+    |-- run_functional_regression.R
+    `-- check_functional_baseline.R   # 与 baselines/functional/ 逐行比对
 ```
 
 ## nanoamp 如何查找外部工具
@@ -67,7 +78,67 @@ nanoamp **Windows 版本**随项目分发的外部工具目录。
 不依赖任何外部二进制。其速度低于 minimap2，适用于中小扩增子，以及
 Windows on ARM 这类没有 minimap2 构建的平台。
 
+该后端报告的覆盖度与 identity **来自 read 实际比对到的参考片段**。（早期版本把每条
+read 都当作覆盖整条参考序列，于是只覆盖一半的 read 也能通过 `--min-ref-coverage 0.99`
+并被计为参考单倍型；默认的 `minimap2` 后端一直是正确的。）
+
 方案 C（`mode = "C"`）同样不需要外部工具。
+
+## R 包依赖
+
+R 包自己读取 FASTQ（`R/io.R`：按扩展名或 gzip 魔数识别压缩、拒绝畸形记录），
+因此**不再需要 `ShortRead`** —— 包的 `DESCRIPTION`、CLI 与 GUI 都没有它。
+其余依赖为 `Biostrings`、`IRanges`、`Matrix`、`Rsamtools`、`data.table`、
+`jsonlite`、`methods`、`optparse`、`readxl`、`stats`、`utils`；`DECIPHER`
+（方案 B 聚类）与 `pwalign`（Bioconductor ≥ 3.19 下的 `aligner = "r"` 后端）是可选依赖，
+`shiny`/`DT` 只在 Shiny 图形界面里用到。
+
+Windows 的 R 环境脚本（`r-environment/setup_r_environment.R`）安装的就是上面这套，
+并且**刻意不装 `ShortRead`**：`ShortRead` 会无条件导入 `pwalign`，从而把一个可选
+provider 变成每次安装的硬依赖。安装器的固定版本清单
+（`release/deps/pinned-R4.6.tsv`）则是**有意的超集**：它与已冻结的离线资产一同校验，
+因此可能仍包含 `ShortRead`，这不影响包真正需要什么。
+
+两个注释示例配置（`example_cds.json`、`example_online.json`）随 R 包分发
+（`nanoamp/inst/configs/`，`nanoamp doctor` 的 `configs` 一行会打印该路径），
+用 `--annotate-config` 指定；`install.exe` 另会复制一份到 `<安装目录>\configs\`。
+
+## 环境压力矩阵
+
+`stress/run_stress_tests.py` 用**真实 CLI**（与 GUI 相同的调用方式）跑方案环境矩阵中
+可自动化的用例，其余记为 `SKIP` 并写明手工步骤：
+
+```powershell
+# 全部（A 组需要联网）
+python 03_dependence/stress/run_stress_tests.py --group A,B,C,D
+
+# 只跑离线组
+python 03_dependence/stress/run_stress_tests.py --group B,C,D
+```
+
+分组：**A** 网络/代理/缓存，**B** 输入退化与注释矩阵规模，**C** 环境（含空格与中文的
+路径、超长路径、缓存目录解析顺序、缺 curl、PATH 无帮助），**D** 取消与并发。
+结果写入 `tmp/test_results/stress/stress_results.tsv`；最近一次全量运行是
+**47 PASS / 0 FAIL / 2 SKIP**（两个 SKIP 是需真机的磁盘满与 ARM64）。`make stress-test`
+一次跑完四组，用例与方案编号的对应关系见 `stress/README.md`。
+
+## 功能回归基线
+
+`r-environment/run_functional_regression.R` 会对 `01_data/` 中每个样本跑方案 A/B/C
+（共 168 次）。`r-environment/check_functional_baseline.R` 把一次运行与
+`baselines/functional/` 中提交入库的快照**逐行**比较（`status`、变异数、
+`top1_variants`、reads 数、`mapping_rate`、`mean_identity`、`top1_proportion`；
+原本 `ok` 的运行一旦不再成功会直接判失败）。
+
+```bash
+make functional-test       # 跑回归并与基线比较
+make functional-baseline   # 重跑并刷新基线（务必先看 diff）
+```
+
+方案 B 调用的 `DECIPHER::Clusterize` 在上游是随机算法（同一输入换一个随机数状态，
+实测同一阈值下得到 29 与 30 个簇），所以本包在调用前固定种子并把
+`clustering_seed`（默认 42）写进 `qc.tsv`，同时不改动调用方 R 会话的随机数流。
+没有这一步，方案 B 的每一行都会在两次运行之间变化，基线也只能当参考。
 
 ## Windows 源码编译
 

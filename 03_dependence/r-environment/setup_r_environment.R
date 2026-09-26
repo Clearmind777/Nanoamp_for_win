@@ -78,7 +78,10 @@ install_cran(c(
 ## 2. Bioconductor ----------------------------------------------------------
 if (has("BiocManager")) {
   cat("\nBiocManager version:", as.character(BiocManager::version()), "\n\n")
-  install_bioc(c("Biostrings", "IRanges", "Rsamtools", "ShortRead"))
+  # ShortRead is deliberately absent: nanoamp reads FASTQ itself (R/io.R), and
+  # ShortRead unconditionally imports pwalign, which would make an optional
+  # provider a hard requirement of every installation.
+  install_bioc(c("Biostrings", "IRanges", "Rsamtools"))
 }
 
 ## 3. optional --------------------------------------------------------------
@@ -89,10 +92,12 @@ install_cran(c("shiny", "DT"))
 if (has("BiocManager")) install_bioc(c("DECIPHER", "pwalign"))
 
 ## 4. summary ---------------------------------------------------------------
+# ShortRead is not listed: nanoamp does not use it (see section 2). A machine that
+# has it installed from an earlier setup is fine, it is simply not required.
 cat("\n=== summary ===\n")
 for (p in c("BiocManager", "data.table", "jsonlite", "optparse", "readxl",
             "testthat", "pkgload", "Biostrings", "IRanges", "Rsamtools",
-            "ShortRead", "shiny", "DT", "DECIPHER", "pwalign")) {
+            "shiny", "DT", "DECIPHER", "pwalign")) {
   v <- ver(p)
   cat(sprintf("%-14s %s\n", p, ifelse(is.na(v), "<MISSING>", v)))
 }

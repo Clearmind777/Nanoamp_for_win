@@ -38,8 +38,10 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.20.md      # sync Linux's lead: core fixes, functional annotation, GUI
     |-- work_report.21.md      # contract docs, structured status, drop ShortRead,
     |                          #   functional baseline + environment stress matrix
-    `-- work_report.22.md      # GUI advanced-parameter/cache/protein panels, haplotype
-                               #   linkage, and the R aligner's real coverage (L13)
+    |-- work_report.22.md      # GUI advanced-parameter/cache/protein panels, haplotype
+    |                          #   linkage, and the R aligner's real coverage (L13)
+    `-- work_report.23.md      # README-CN sync, window title + path separators,
+                               #   release 0.1.5 preparation
 ```
 
 The original request and the requested deliverables are documented in

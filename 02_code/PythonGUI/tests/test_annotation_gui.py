@@ -16,6 +16,7 @@ break the user experience:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import tkinter as tk
@@ -28,8 +29,8 @@ sys.path.insert(0, str(GUI))
 
 from nanoamp_gui.app import (  # noqa: E402
     ADVANCED_DEFAULTS, ALIGNER_DEFAULT, ALIGNERS, ANNOTATION_CUSTOM,
-    ANNOTATION_OFFLINE, ANNOTATION_ONLINE, CONSENSUS_DEFAULT, TRANSCRIPT_AUTO,
-    NanoampApp,
+    ANNOTATION_OFFLINE, ANNOTATION_ONLINE, ANNOTATION_SOURCES, APP_TITLE,
+    CONSENSUS_DEFAULT, TRANSCRIPT_AUTO, NanoampApp,
 )
 
 failures: list[str] = []
@@ -52,6 +53,81 @@ root = tk.Tk()
 root.title("annotation gui check")
 app = NanoampApp(root, REPO)
 root.update_idletasks()
+
+print("=== 0) window title and path separators ===")
+check(APP_TITLE == "nanoamp", "the app title is just the program name", APP_TITLE)
+check("纳米孔" not in APP_TITLE and " - " not in APP_TITLE,
+      "the descriptive suffix is gone from the title")
+headings = [w.cget("text") for w in walk(app)
+            if w.winfo_class() == "TLabel" and w.cget("text")]
+check(any(h == "nanoamp" for h in headings),
+      "the window heading is the program name", str(headings[:3]))
+check(not any("纳米孔 PCR 产物分析" in h for h in headings),
+      "no heading keeps the removed suffix")
+
+# Tk's file dialogs return '/' while pathlib-built paths use '\'; the window must
+# show one form. Windows paths are the native form used by the documentation.
+check(NanoampApp.normalize_path_text("D:/data/sample.fastq") ==
+      "D:\\data\\sample.fastq", "forward slashes become backslashes",
+      NanoampApp.normalize_path_text("D:/data/sample.fastq"))
+check(NanoampApp.normalize_path_text("D:\\data\\ref.fa") == "D:\\data\\ref.fa",
+      "backslash paths are left alone")
+check(NanoampApp.normalize_path_text("") == "", "an empty value stays empty")
+check(NanoampApp.normalize_path_text("  D:/a/b  ") == "D:\\a\\b",
+      "surrounding whitespace is trimmed")
+check(NanoampApp.normalize_path_text("relative/dir/x.fa") ==
+      os.path.join("relative", "dir", "x.fa"),
+      "relative paths keep their meaning",
+      NanoampApp.normalize_path_text("relative/dir/x.fa"))
+
+# The dialogs themselves must store the normalised form.
+import nanoamp_gui.app as app_module  # noqa: E402
+
+original_open = app_module.filedialog.askopenfilename
+original_dir = app_module.filedialog.askdirectory
+try:
+    app_module.filedialog.askopenfilename = lambda **kwargs: "C:/data/E4-3/reads.fastq"
+    app.var_reads.set("")
+    app.var_reference.set("ref-keep")
+    app._pick_reads()
+    check(app.var_reads.get() == "C:\\data\\E4-3\\reads.fastq",
+          "the FASTQ picker stores backslashes", app.var_reads.get())
+
+    app_module.filedialog.askopenfilename = lambda **kwargs: "C:/data/E4-3/reference.fa"
+    app.var_reference.set("")
+    app._pick_reference()
+    check(app.var_reference.get() == "C:\\data\\E4-3\\reference.fa",
+          "the reference picker stores backslashes", app.var_reference.get())
+
+    app_module.filedialog.askdirectory = lambda **kwargs: "C:/data/out dir"
+    app._pick_outdir()
+    check(app.var_outdir.get() == "C:\\data\\out dir",
+          "the output-directory picker stores backslashes", app.var_outdir.get())
+
+    app_module.filedialog.askopenfilename = lambda **kwargs: "C:/data/cfg/cds.json"
+    app.var_annot_on.set(True)
+    app._pick_annotation_config()
+    check(app.var_annot_custom.get() == "C:\\data\\cfg\\cds.json",
+          "the config picker stores backslashes", app.var_annot_custom.get())
+    check(app.var_annot_source.get() == ANNOTATION_CUSTOM,
+          "picking a config selects the custom source")
+
+    # The auto-filled reference (same directory as the reads) is normalised too.
+    sample = Path(tempfile.mkdtemp(prefix="nanoamp_gui_paths_"))
+    (sample / "reference.self.fa").write_text(">r\nACGT\n", encoding="utf-8")
+    app.var_reference.set("")
+    app._suggest_reference(Path("C:/data/E4-3/reads.fastq"))   # nothing to find
+    check(app.var_reference.get() == "", "a directory without a reference fills nothing")
+    app._suggest_reference(sample / "reads.fastq")
+    check(app.var_reference.get().endswith("reference.self.fa") and
+          "/" not in app.var_reference.get(),
+          "the auto-filled reference has no forward slashes",
+          app.var_reference.get())
+finally:
+    app_module.filedialog.askopenfilename = original_open
+    app_module.filedialog.askdirectory = original_dir
+    app.var_annot_on.set(False)
+    app.var_annot_source.set(ANNOTATION_SOURCES[0])
 
 print("=== 1) default state ===")
 check(not app.var_annot_on.get(), "annotation is off by default")
@@ -238,7 +314,7 @@ sample = "[GUI] 中文日志：注释不可用，请改用离线 CDS 路线。" 
 app._append_log(sample)
 logged = app.log_text.get("1.0", "end")
 check(sample in logged, "Chinese and long log lines survive", f"{len(logged)} chars")
-check("�" not in logged, "no replacement characters in the log")
+check("\ufffd" not in logged, "no replacement characters in the log")
 
 print("\n=== 6g) advanced parameters are sent only when changed (G10) ===")
 app.var_advanced_on.set(False)
