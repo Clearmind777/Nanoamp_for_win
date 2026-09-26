@@ -80,6 +80,21 @@ nanoamp help
 `--aligner r` 选择 R 内比对后端（不需要 minimap2）。完整的注释相关参数见
 `02_code/r/README-CN.md` 与 `release/02_CLI/README.md`。
 
+## 输入文件契约（摘要）
+
+完整表格（格式细节、路径限制、每个功能对应要准备什么、注释配置字段校验）见
+`README.md` 的 §2「输入文件契约」。要点：
+
+| 项目 | 内容 |
+|---|---|
+| 最少必需 | **FASTQ（一个样本一个文件）+ 目的序列 FASTA + 一个可写的输出目录**；参考基因组、GTF/GFF、公司 `.xlsx` 变异表、Sanger 峰图都不需要 |
+| FASTQ | 每条 read 四行（`@名称`/序列/`+`/质量），序列必须一行；行数须为 4 的倍数、`@` 与 `+` 位置必须正确，否则明确报错；`.gz` 按后缀**或 gzip 魔数**识别；名称去掉 `@` 作为 `read_id`；序列大写化；**质量行不参与任何计算**；空文件报错 |
+| FASTA | 必须有 `>` 头；**只用第一条序列**（多序列文件不报错，其余被忽略）；按 DNA 读取并大写化；文件缺失或为空时报错；路径与 MD5 记入 `run_manifest.json` |
+| 长度关系 | reads 默认需覆盖参考的 ≥ 90%（`--min-ref-coverage` 0.90）、一致度 ≥ 90%（`--min-identity` 0.90） |
+| 命名 | 程序**不要求**任何文件名；唯一约定是 GUI 会在 FASTQ 同目录找 `reference.self.fa` / `reference.fa` / `reference.wt.fa` 自动填入，以及 `nanoamp batch` 样本表的列名 `sample/reads/reference`（可选 `ref_label`），`sample` 值会用作输出子目录名 |
+| 路径 | 支持空格与中文；超过 260 字符且未启用长路径时明确报错；结果表覆盖写，`nanoamp.log` 追加写（同一输出目录重复运行会累积，建议每次用新目录） |
+| 按功能准备 | 模式 A/B 还需比对程序（内置 minimap2 或 `--aligner r`），模式 C 不需要；离线 CDS 注释需 `"route": "cds"` 配置且 CDS 长度是 3 的倍数；在线 genome 注释需联网且目的序列与 GRCh38 锚定覆盖率 ≥ 90%；批量需样本表 |
+
 ## 功能注释（可选，默认关闭）
 
 不传 `--annotate-config`（命令行）或不勾选「功能注释…」（图形界面）时，输出与该功能
