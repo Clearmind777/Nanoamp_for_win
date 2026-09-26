@@ -129,7 +129,7 @@ GUI 勾选「功能注释…」，命令行加 `--annotate-config <config.json>`
 
 ```text
 nanoamp-0.1.5-windows-setup.zip
-  sha256  76e02f190ee29cf226d769b662638e9364fe32f229738e8996526d01c3dab1ba
+  sha256  52e78aeee243bc4db4488cb07a6816c5c5c3e64de05fd07a9d1ae649fc840caa
 
 nanoamp-0.1.0-windows-offline-deps.zip
   sha256  2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40

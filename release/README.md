@@ -123,9 +123,9 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
           修掉三处 GUI 问题：关掉注释后不再显示上一次的 annotation.tsv、
           点「开始分析」清空结果页且可用「查看上次结果」回看、
           不勾选 PATH 时也能找到 minimap2（另：CDS「止」按目的序列长度预填）
-          sha256 76e02f190ee29cf226d769b662638e9364fe32f229738e8996526d01c3dab1ba
           离线依赖包未变（sha256 2db72289…，重建结果逐字节一致）
-          sha256 见 release/_build/SHA256SUMS.txt
+          sha256 见 release/_build/SHA256SUMS.txt（这个文件不进资产，所以资产自身的
+          校验值写在那里，不会因为改本文件而失效）
 ```
 
 > 同名不同内容：如果要把这一版发出去，请**新建一个 tag（例如 v0.1.6）**，
