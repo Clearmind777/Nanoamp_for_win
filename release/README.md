@@ -21,7 +21,7 @@ release/
 `-- _build/               打包工作区（开发者用；zip 在这里生成，不进 Git）
     |-- build_assets.py       重新生成两个 zip（内容逐条自校验）
     |-- SHA256SUMS.txt        产物的 sha256，随仓库提交，便于对账
-    |-- nanoamp-0.1.5-windows-setup.zip          ← 上传这个（约 34 MB，**单独也能装**）
+    |-- nanoamp-0.1.6-windows-setup.zip          ← 上传这个（约 34 MB，**单独也能装**）
     `-- nanoamp-0.1.0-windows-offline-deps.zip   ← 可选：装上就不用联网下载依赖（约 248 MB）
 ```
 
@@ -107,8 +107,8 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
 
 ## 上传
 
-**已发布的版本：v0.1.3 与 v0.1.5**。当前仓库里的 setup 包比已发布的 v0.1.5 更新
-（含一轮 GUI 修复），**尚未上传**：
+**已发布的版本：v0.1.3 与 v0.1.5。v0.1.6 的资产已经打好（`_build/nanoamp-0.1.6-windows-setup.zip`），
+等使用者手动发布：**
 
 ```text
 已发布  : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
@@ -117,28 +117,26 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
                  sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
 
 已发布  : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.5
-          asset nanoamp-0.1.5-windows-setup.zip
+          asset nanoamp-0.1.5-windows-setup.zip（已发布的旧字节）
                  sha256 494886c61c8814543bd204d6fb8b6ce81fe1ef12e571bf3131b885053a3b5384
           asset nanoamp-0.1.0-windows-offline-deps.zip
                  sha256 2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40
 
-未发布  : release/_build/nanoamp-0.1.5-windows-setup.zip（同名，内容已更新）
-          修掉三处 GUI 问题：关掉注释后不再显示上一次的 annotation.tsv、
-          点「开始分析」清空结果页且可用「查看上次结果」回看、
-          不勾选 PATH 时也能找到 minimap2（另：CDS「止」按目的序列长度预填）
-          又一轮 GUI 改进：修掉"请先在「注释结果」里选一行"的误报（表现为窗口像卡死一样）、
-          新增分析名称、变异注释页说明缺哪一步、单倍型页可拖动分隔线、每页水平滚动条、
-          输出文件按 KB/MB/GB 显示、QC 指标说明
-          卸载器放入安装目录：install.exe 同时把 uninstall.exe 复制到 <安装目录>，
-          装完可删掉安装包；从安装目录运行时它会删掉其余内容后再自删
-          离线依赖包未变（sha256 2db72289…，重建结果逐字节一致）
+待发布  : release/_build/nanoamp-0.1.6-windows-setup.zip
+          tag / 标题 / 说明：v0.1.6 / "nanoamp 0.1.6 — Windows 版" /
+                 release/RELEASE_NOTES-0.1.6.md
+          内容：0.1.5 之后的所有 Windows 界面与安装器改动
+                （注释页卡死、只显示本次注释、结果页刷新+查看上次结果、分析名称、
+                  非默认安装也能找到 minimap2、CDS「止」预填、变异注释页提示、
+                  可拖动分隔线、水平滚动条、KB/MB/GB、QC 指标说明、
+                  卸载器放入安装目录并可自删除且不再弹 ping 窗口）
+          离线依赖包沿用 0.1.5 那一份（sha256 2db72289…，重建结果逐字节一致）
           sha256 见 release/_build/SHA256SUMS.txt（这个文件不进资产，所以资产自身的
           校验值写在那里，不会因为改本文件而失效）
 ```
 
-> 同名不同内容：如果要把这一版发出去，请**新建一个 tag（例如 v0.1.6）**，
-> 而不是把新文件覆盖到已发布的 v0.1.5 附件上 —— 已发布的校验值写在
-> `RELEASE_NOTES-0.1.5.md` 里，覆盖会让下过旧包的人对不上账。
+> 0.1.5 已发布的附件是**旧字节**（setup `494886c6…`），请不要覆盖它：新内容一律用新 tag。
+> 发布 v0.1.6 时把 `RELEASE_NOTES-0.1.6.md` 贴成发布说明即可。
 
 v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已作为
 **v0.1.2** 的附件发布（sha256 `16035340…`），发布说明直接链接到它。
@@ -146,14 +144,17 @@ v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起�
 从 0.1.4 起 setup 包单独也能装完（联网下载固定版本的依赖），离线包只是耗时更短、
 不受镜像状态影响的选项。
 
-下次发版（示例：升到 0.1.6）：先改 `_build/build_assets.py` 里的 `SETUP_VERSION`
-（当前仍是 `0.1.5`，因为这一版还没有定版本号），重建资产，然后
+下次发版（示例：升到 0.1.7）：先改 `_build/build_assets.py` 里的 `SETUP_VERSION`
+（当前是 `0.1.6`）、按 `release/RELEASE_NOTES-<版本>.md` 写说明，重建资产，然后
 
 ```powershell
-gh release create v0.1.6 `
-  release\_build\nanoamp-0.1.6-windows-setup.zip `
-  --title "nanoamp 0.1.6 — Windows 版" --notes-file <说明.md>
+gh release create v0.1.7 `
+  release\_build\nanoamp-0.1.7-windows-setup.zip `
+  --title "nanoamp 0.1.7 — Windows 版" --notes-file release\RELEASE_NOTES-0.1.7.md
 ```
+
+也可以只用本地脚本 `python release/_build/publish_release.py --publish`
+（它读 `SETUP_VERSION` 推出 tag、核对校验值与说明文件；需要 `GITHUB_TOKEN`/`GH_TOKEN`）。
 
 或在 GitHub 网页上创建 tag 并上传。文件名不要修改：使用者按
 `nanoamp-<版本>-windows-setup.zip` 查找安装包，`nanoamp-0.1.0-windows-offline-deps.zip`
@@ -163,7 +164,7 @@ gh release create v0.1.6 `
 
 **只下载 setup 包也可以**（安装时会联网下载固定版本的依赖）：
 
-1. 把 `nanoamp-0.1.5-windows-setup.zip` 解压到**路径不含中文和空格**的位置，例如 `D:\nanoamp\`
+1. 把 `nanoamp-0.1.6-windows-setup.zip` 解压到**路径不含中文和空格**的位置，例如 `D:\nanoamp\`
 2. 双击解压出来的 **`install.exe`**，点「开始安装」；需要避免联网时，再把
    `nanoamp-0.1.0-windows-offline-deps.zip` 也解压到同一个 `nanoamp-windows\` 里
 
@@ -218,7 +219,7 @@ GUI 勾选「功能注释…」、命令行加 `--annotate-config`，程序就�
 路径含空格与中文/超长路径/取消/并发等），两条命令都会在失败时以非零状态退出。
 
 因此**发布资产的数量与布局没有任何变化**：仍然是
-`nanoamp-0.1.5-windows-setup.zip`（安装器 + R 包 + GUI + minimap2 + 在线安装用的
+`nanoamp-0.1.6-windows-setup.zip`（安装器 + R 包 + GUI + minimap2 + 在线安装用的
 固定版本清单）加上可选的 `nanoamp-0.1.0-windows-offline-deps.zip`（离线依赖）。
 重建资产后 `_build/SHA256SUMS.txt` 里 setup 包的 sha256 会随之更新。
 
@@ -319,7 +320,7 @@ uninstall.exe --silent --keep-runtime         :: 保留随程序安装的 R
 ## 安装包组合说明：setup 包单独即可安装，两个 zip 建议解压到同一个文件夹
 
 `install.exe` 和 `uninstall.exe` 各约 11 MB。**只解压
-`nanoamp-0.1.5-windows-setup.zip` 即可完成安装**：`deps/pinned-R4.6.tsv` 里带着
+`nanoamp-0.1.6-windows-setup.zip` 即可完成安装**：`deps/pinned-R4.6.tsv` 里带着
 依赖包的确切版本，安装器会自动测速选源、联网下载（约 159 MB，视网速 5–15 分钟），
 `bin/minimap2.exe` 也已经在 setup 包里。
 

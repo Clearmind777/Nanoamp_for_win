@@ -52,8 +52,10 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |-- work_report.27.md      # seven GUI improvements (analysis name, resizable
     |                          #   panes, scrollbars, sizes, QC glossary, hints,
     |                          #   protein view / freeze fix)
-    `-- work_report.28.md      # installer places a self-deleting uninstall.exe in
-                               #   the install directory
+    |-- work_report.28.md      # installer places a self-deleting uninstall.exe in
+    |                          #   the install directory
+    `-- work_report.29.md      # 0.1.6 release notes and asset packaging (the
+                               #   release itself is published by hand)
 ```
 
 The original request and the requested deliverables are documented in

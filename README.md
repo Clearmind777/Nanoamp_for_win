@@ -171,7 +171,7 @@ D:\nanoamp\
 > 请勿直接在压缩包内双击运行，也不要解压到桌面（桌面路径通常包含中文用户名）。
 > 解压后应能看到 `install.exe`、`01_R-package`、`deps` 等文件夹。
 >
-> 发布资产有两个，均在 `release/_build/` 下构建：`nanoamp-0.1.5-windows-setup.zip`
+> 发布资产有两个，均在 `release/_build/` 下构建：`nanoamp-0.1.6-windows-setup.zip`
 > （约 34 MB，**可独立安装**）与 `nanoamp-0.1.0-windows-offline-deps.zip`
 > （约 248 MB，可选，用于离线安装）。仅安装 setup 包时需要联网：安装器会先测速选源，
 > 再按 `deps/pinned-R4.6.tsv` 中**固定的版本**下载 R 依赖包。需要在无网络环境下安装时，

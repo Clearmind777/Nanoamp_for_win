@@ -9,9 +9,12 @@
 release/_build/
 |-- build_assets.py                      打包脚本（内容逐条 sha256 自校验）
 |-- SHA256SUMS.txt                    产物的 sha256 —— 这个进 Git，便于对账
-|-- nanoamp-0.1.5-windows-setup.zip        ~34 MB  ← 上传这个
+|-- nanoamp-0.1.6-windows-setup.zip        ~34 MB  ← 上传这个
 `-- nanoamp-0.1.0-windows-offline-deps.zip  ~248 MB ← 可选（离线依赖）
 ```
+
+> `SETUP_VERSION` 在 `build_assets.py` 顶部；改完它（以及
+> `release/RELEASE_NOTES-<版本>.md`）再打包，就得到一份新版本的 setup 包。
 
 ## 用法
 

@@ -3,7 +3,7 @@
 
 Two assets, both rooted at `nanoamp-windows/`:
 
-    nanoamp-0.1.5-windows-setup.zip          install.exe + uninstall.exe +
+    nanoamp-0.1.6-windows-setup.zip          install.exe + uninstall.exe +
                                             README.md + 01_R-package/ +
                                             02_CLI/ + 03_GUI/ + deps/ + bin/
     nanoamp-0.1.0-windows-offline-deps.zip   _offline/  (R installer, 109 R
@@ -53,7 +53,7 @@ OUT = Path(__file__).resolve().parent
 TREE = OUT.parent
 ROOT = "nanoamp-windows"
 
-SETUP_VERSION = "0.1.5"
+SETUP_VERSION = "0.1.6"
 SETUP_ZIP = f"nanoamp-{SETUP_VERSION}-windows-setup.zip"
 OFFLINE_ZIP = "nanoamp-0.1.0-windows-offline-deps.zip"
 
