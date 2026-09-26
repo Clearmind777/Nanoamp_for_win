@@ -28,6 +28,14 @@ conda 也不使用 WSL。**
 >    负链时等位基因正确反向互补；**Mode B 结果可复现**（聚类引擎随机种子已固定并
 >    记入 `qc.tsv` 的 `clustering_seed`）；HTTP 大响应不再被截断；`--aligner r`
 >    的覆盖度/一致度按真实比对片段计算（此前会把只覆盖一半的 read 当成全覆盖）。
+> 6. **GUI 修掉三处会误导结果的问题**：①关掉功能注释后再跑，注释两页不再显示
+>    上一次运行留下的 `annotation.tsv`（并说明"未显示"），此前会把旧结果连同空计数
+>    一起画出来；②点「开始分析」会清空六个结果页，上一次的结果保存在内存里，
+>    可点新增的「查看上次结果」回看（「运行日志」不清空）；③**安装时不勾选
+>    "把 nanoamp 命令加入用户 PATH" 也能找到 minimap2**（窗口改为按
+>    `%LOCALAPPDATA%\nanoamp.path` 定位安装目录，并把 `<安装目录>\bin\minimap2.exe`
+>    固定交给 R）。另外，离线 CDS 路线的「止」会按目的序列长度预填（标注为预填值，
+>    可修改，仍校验 3 的倍数）。
 
 ---
 
@@ -121,7 +129,7 @@ GUI 勾选「功能注释…」，命令行加 `--annotate-config <config.json>`
 
 ```text
 nanoamp-0.1.5-windows-setup.zip
-  sha256  494886c61c8814543bd204d6fb8b6ce81fe1ef12e571bf3131b885053a3b5384
+  sha256  76e02f190ee29cf226d769b662638e9364fe32f229738e8996526d01c3dab1ba
 
 nanoamp-0.1.0-windows-offline-deps.zip
   sha256  2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40

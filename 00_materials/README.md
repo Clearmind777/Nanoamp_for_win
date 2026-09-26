@@ -44,9 +44,11 @@ Linux tooling, WSL or conda therefore describe past state, not this repository.
     |                          #   release 0.1.5 preparation
     |-- work_report.24.md      # root README input-file contract, tmp/ category-A
     |                          #   cleanup, and the loss of the R environment
-    `-- work_report.25.md      # GUI: stale annotation files, page refresh with an
-                               #   in-memory previous run, minimap2 without PATH,
-                               #   CDS end default
+    |-- work_report.25.md      # GUI: stale annotation files, page refresh with an
+    |                          #   in-memory previous run, minimap2 without PATH,
+    |                          #   CDS end default
+    `-- work_report.26.md      # .gitignore check, rebuilt release assets, and the
+                               #   installed-tree end-to-end verification
 ```
 
 The original request and the requested deliverables are documented in

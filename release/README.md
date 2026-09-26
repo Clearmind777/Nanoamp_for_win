@@ -104,20 +104,33 @@ python release\_build\build_assets.py --compare-published tmp\published\<setup.z
 
 ## 上传
 
-**v0.1.3 是当前最后一个已发布的版本，v0.1.4 与 v0.1.5 均尚未发布**：
+**已发布的版本：v0.1.3 与 v0.1.5**。当前仓库里的 setup 包比已发布的 v0.1.5 更新
+（含一轮 GUI 修复），**尚未上传**：
 
 ```text
 已发布  : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.3
-          tag v0.1.3 → a00c83c
+          tag v0.1.3
           asset nanoamp-0.1.3-windows-setup.zip  33,198,534 B
                  sha256 f408872787bf74ec5ae2146b9c07d2fc928ddc640a3c57fd8d54242a37a75e6a
 
-未发布  : release/_build/nanoamp-0.1.5-windows-setup.zip
-          0.1.4 增加了"没有离线包也能联网安装（固定版本、自动选源）"
-          0.1.5 补上 bin/minimap2.exe（联网装的机器也有比对程序）
-                    + GUI 直接按 <安装目录>\bin\minimap2.exe 定位比对程序
+已发布  : https://github.com/Clearmind777/Nanoamp_for_win/releases/tag/v0.1.5
+          asset nanoamp-0.1.5-windows-setup.zip
+                 sha256 494886c61c8814543bd204d6fb8b6ce81fe1ef12e571bf3131b885053a3b5384
+          asset nanoamp-0.1.0-windows-offline-deps.zip
+                 sha256 2db72289a8ecef7e16ef388f8c6a8a59c1369b6c2212fcfa29d92297d9162d40
+
+未发布  : release/_build/nanoamp-0.1.5-windows-setup.zip（同名，内容已更新）
+          修掉三处 GUI 问题：关掉注释后不再显示上一次的 annotation.tsv、
+          点「开始分析」清空结果页且可用「查看上次结果」回看、
+          不勾选 PATH 时也能找到 minimap2（另：CDS「止」按目的序列长度预填）
+          sha256 76e02f190ee29cf226d769b662638e9364fe32f229738e8996526d01c3dab1ba
+          离线依赖包未变（sha256 2db72289…，重建结果逐字节一致）
           sha256 见 release/_build/SHA256SUMS.txt
 ```
+
+> 同名不同内容：如果要把这一版发出去，请**新建一个 tag（例如 v0.1.6）**，
+> 而不是把新文件覆盖到已发布的 v0.1.5 附件上 —— 已发布的校验值写在
+> `RELEASE_NOTES-0.1.5.md` 里，覆盖会让下过旧包的人对不上账。
 
 v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起没有变化，已作为
 **v0.1.2** 的附件发布（sha256 `16035340…`），发布说明直接链接到它。
@@ -125,12 +138,13 @@ v0.1.3 发布时只上传了 setup 包：离线依赖包的内容自 0.1.0 起�
 从 0.1.4 起 setup 包单独也能装完（联网下载固定版本的依赖），离线包只是耗时更短、
 不受镜像状态影响的选项。
 
-下次发版：先更新 `_build/build_assets.py` 里的 `SETUP_VERSION` 与文件名，重建资产，然后
+下次发版（示例：升到 0.1.6）：先改 `_build/build_assets.py` 里的 `SETUP_VERSION`
+（当前仍是 `0.1.5`，因为这一版还没有定版本号），重建资产，然后
 
 ```powershell
-gh release create v0.1.5 `
-  release\_build\nanoamp-0.1.5-windows-setup.zip `
-  --title "nanoamp 0.1.5 — Windows 版" --notes-file <说明.md>
+gh release create v0.1.6 `
+  release\_build\nanoamp-0.1.6-windows-setup.zip `
+  --title "nanoamp 0.1.6 — Windows 版" --notes-file <说明.md>
 ```
 
 或在 GitHub 网页上创建 tag 并上传。文件名不要修改：使用者按
